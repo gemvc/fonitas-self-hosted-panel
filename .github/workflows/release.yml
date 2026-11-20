@@ -37,22 +37,30 @@ jobs:
           cp LICENSE dist/LICENSE
           (cd dist && zip -qr ../fonitas-self-hosted-panel.zip .)
           unzip -tq fonitas-self-hosted-panel.zip
-      - name: Publish ZIP
+      - name: Build and sign OEM release
+        env:
+          OEM_RELEASE_SIGNING_KEY: ${{ secrets.OEM_RELEASE_SIGNING_KEY }}
+        run: |
+          npm run build:oem
+          (cd dist-oem && zip -qD ../panel-oem.zip oem.html assets/*)
+          unzip -tq panel-oem.zip
+          node installer/sign-release.mjs
+      - name: Publish ZIP and OEM installer
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          asset=fonitas-self-hosted-panel.zip
-          if status="$(gh release view "$TAG" --json isDraft,assets --jq '[.isDraft, any(.assets[]; .name == "fonitas-self-hosted-panel.zip")] | @tsv')"; then
+          assets=(fonitas-self-hosted-panel.zip panel-oem.zip oem-release.json setup.php)
+          if status="$(gh release view "$TAG" --json isDraft,assets --jq '[.isDraft, ((.assets | map(.name) | sort) == (["fonitas-self-hosted-panel.zip", "panel-oem.zip", "oem-release.json", "setup.php"] | sort))] | @tsv')"; then
             if [[ "$status" == $'false\ttrue' ]]; then
               exit 0
             fi
             if [[ "$status" == false* ]]; then
-              echo "This tag was published without its ZIP asset." >&2
+              echo "This tag was published without its expected release assets." >&2
               exit 1
             fi
           else
             gh release create "$TAG" --verify-tag --generate-notes --draft
           fi
-          gh release upload "$TAG" "$asset" --clobber
+          gh release upload "$TAG" "${assets[@]}" --clobber
           gh release edit "$TAG" --draft=false
