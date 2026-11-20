@@ -144,7 +144,8 @@ function panelActivate(string $origin, #[SensitiveParameter] string $key): strin
     return $token;
 }
 
-function panelRelease(string $directory, ?string $current): string
+/** @return array{version: string, sha256: string} */
+function panelLatestRelease(): array
 {
     if (!str_contains(PANEL_PUBLIC_KEY, 'BEGIN PUBLIC KEY')) {
         throw new RuntimeException('Download the signed installer from the release page.');
@@ -167,10 +168,15 @@ function panelRelease(string $directory, ?string $current): string
     if (version_compare($version, PANEL_MINIMUM_RELEASE, '<')) {
         throw new RuntimeException('The release is older than this installer supports.');
     }
+
+    return ['version' => $version, 'sha256' => $hash];
+}
+
+/** @param array{version: string, sha256: string} $release */
+function panelStageRelease(string $directory, array $release): string
+{
+    ['version' => $version, 'sha256' => $hash] = $release;
     $id = $version.'-'.substr($hash, 0, 16);
-    if ($current !== null && version_compare($version, explode('-', $current, 2)[0], '<=')) {
-        return $current;
-    }
     $target = $directory.'/'.$id;
     if (is_file($target.'/oem.html')) {
         return $id;
@@ -234,6 +240,28 @@ function panelRelease(string $directory, ?string $current): string
     }
 
     return $id;
+}
+
+function panelInstalledVersion(string $active): string
+{
+    return explode('-', $active, 2)[0];
+}
+
+/** @return array{release: ?array{version: string, sha256: string}, error: ?string, expires: int} */
+function panelReleaseStatus(): array
+{
+    $cache = $_SESSION['releaseCheck'] ?? null;
+    if ($cache !== null && $cache['expires'] > time()) {
+        return $cache;
+    }
+
+    try {
+        $release = panelLatestRelease();
+
+        return $_SESSION['releaseCheck'] = ['release' => $release, 'error' => null, 'expires' => time() + 300];
+    } catch (RuntimeException $exception) {
+        return $_SESSION['releaseCheck'] = ['release' => null, 'error' => $exception->getMessage(), 'expires' => time() + 60];
+    }
 }
 
 function panelField(string $name): string
@@ -375,7 +403,7 @@ function panelAction(string $directory, string $origin, array $state, string $ac
         $users = panelUsers();
         $created = panelInstallEntry();
         try {
-            $active = panelRelease($directory, null);
+            $active = panelStageRelease($directory, panelLatestRelease());
             $credential = panelActivate($origin, panelField('key'));
             panelSave($directory, [
                 'origin' => $origin, 'password' => password_hash($password, PASSWORD_DEFAULT), 'credential' => $credential,
@@ -410,8 +438,13 @@ function panelAction(string $directory, string $origin, array $state, string $ac
         throw new RuntimeException('Sign in to manage this dashboard.');
     }
     if ($action === 'logout') {
-        unset($_SESSION['adminUntil']);
+        unset($_SESSION['adminUntil'], $_SESSION['releaseCheck']);
         session_regenerate_id(true);
+
+        return;
+    }
+    if ($action === 'check-update') {
+        unset($_SESSION['releaseCheck']);
 
         return;
     }
@@ -419,12 +452,19 @@ function panelAction(string $directory, string $origin, array $state, string $ac
         $state['branding'] = panelBranding();
         $state['users'] = panelUsers();
     } elseif ($action === 'update') {
-        $current = $state['active'];
-        $next = panelRelease($directory, $current);
-        if ($next !== $current) {
-            $state['previous'] = $current;
-            $state['active'] = $next;
+        unset($_SESSION['releaseCheck']);
+        $check = panelReleaseStatus();
+        $latest = $check['release'];
+        if ($latest === null) {
+            throw new RuntimeException($check['error'] ?? 'Could not check for updates.');
         }
+        if (panelField('installed_release') !== $state['active'] || panelField('update_version') !== $latest['version']
+            || !hash_equals($latest['sha256'], panelField('update_sha256'))
+            || version_compare($latest['version'], panelInstalledVersion($state['active']), '<=')) {
+            throw new RuntimeException('The available or installed release changed. Review the version below before confirming.');
+        }
+        $state['previous'] = $state['active'];
+        $state['active'] = panelStageRelease($directory, $latest);
     } elseif ($action === 'rollback' && is_string($state['previous'])) {
         $state['active'] = $state['previous'];
         $state['previous'] = null;
@@ -491,8 +531,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         panelFail(409, 'Another management operation is in progress. Try again shortly.');
     }
     try {
-        panelAction($directory, $origin, panelState($directory), panelField('action'));
-        header('Location: /setup.php?saved=1', true, 303);
+        $action = panelField('action');
+        panelAction($directory, $origin, panelState($directory), $action);
+        header('Location: /setup.php'.($action === 'check-update' ? '' : '?saved=1'), true, 303);
         exit;
     } catch (RuntimeException $exception) {
         $error = $exception->getMessage();
@@ -501,6 +542,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     }
 }
 $admin = $state !== [] && ($_SESSION['adminUntil'] ?? 0) >= time();
+if ($admin) {
+    $state = panelState($directory);
+    $installedVersion = panelInstalledVersion($state['active']);
+    $releaseStatus = panelReleaseStatus();
+    $latest = $releaseStatus['release'];
+}
 header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
 ?>
 <!doctype html>
@@ -527,8 +574,20 @@ form{margin:1.25rem 0}label{display:block;margin:.75rem 0}input,textarea,select{
 <label>Management password <input type="password" name="password" required autocomplete="current-password"></label>
 <button>Sign in</button></form>
 <?php else: ?>
-<p>Installed version <strong><?= panelEscape(explode('-', $state['active'], 2)[0]) ?></strong></p>
-<?php panelForm('update'); ?><button>Check and install update</button></form>
+<p>Installed version <strong><?= panelEscape($installedVersion) ?></strong></p>
+<?php if ($latest === null): ?>
+<p role="status">Update check unavailable. <?= panelEscape($releaseStatus['error'] ?? '') ?></p>
+<?php elseif (version_compare($latest['version'], $installedVersion, '>')): ?>
+<p role="status">Version <strong><?= panelEscape($latest['version']) ?></strong> is available.</p>
+<?php panelForm('update'); ?>
+<input type="hidden" name="installed_release" value="<?= panelEscape($state['active']) ?>">
+<input type="hidden" name="update_version" value="<?= panelEscape($latest['version']) ?>">
+<input type="hidden" name="update_sha256" value="<?= panelEscape($latest['sha256']) ?>">
+<button>Install version <?= panelEscape($latest['version']) ?></button></form>
+<?php else: ?>
+<p role="status">No newer version is available. Latest release: <?= panelEscape($latest['version']) ?>.</p>
+<?php endif; ?>
+<?php panelForm('check-update'); ?><button>Check again</button></form>
 <?php if ($state['previous'] !== null): ?>
 <?php panelForm('rollback'); ?><button>Restore previous version</button></form>
 <?php endif; ?>
