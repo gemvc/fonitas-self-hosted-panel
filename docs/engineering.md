@@ -141,9 +141,11 @@ Operators use the [backend production runbook][key-operations] to issue a key.
 
 ## Releases
 
-Bump [VERSION](../VERSION) as well as the matching versions in [package.json](../package.json) and [package-lock.json](../package-lock.json), then merge to `main`. A push that changes `VERSION` on `main` starts the [release workflow](../.github/workflows/release.yml). CI builds the static ZIP from that exact commit and stores it as an Actions artifact before signing the OEM bundle.
+Every push to `main`, including a merged pull request, starts the [release workflow](../.github/workflows/release.yml) for the pushed head commit. [VERSION](../VERSION) sets the base version. CI increases its patch number by the number of first-parent commits since the base was set or automatic versioning was introduced, whichever is later. A push with several commits publishes one version for its final commit. Re-running a commit keeps its version. To start a new major or minor series, update the base in `VERSION`, `package.json`, and `package-lock.json` together. ([Version resolver](../scripts/resolve-release-version.sh))
 
-After both builds and OEM signing succeed, the same run creates the matching `vX.Y.Z` tag if it is missing and publishes the GitHub Release. An existing tag must point to the commit being packaged. An existing complete release is preserved. A matching manual tag push from `main` history also works. To release a version already on `main`, use **Actions → Publish self-hosted panel ZIP → Run workflow** on `main`. The workflow publishes these assets together:
+CI applies the calculated version in its build workspace. The static ZIP includes a `VERSION` file and the OEM installer uses the same version in its signed manifest. CI stores the static ZIP as an Actions artifact before OEM signing. After both builds and signing succeed, the same run creates the matching tag if it is missing and publishes the Release. A tag already pointing to another commit stops publication. An existing complete release is preserved.
+
+Use **Actions → Publish self-hosted panel ZIP → Run workflow** on `main` to retry the current commit. A manual tag must match the calculated version on the tagged commit. The workflow publishes these assets together:
 
 | Asset | Purpose |
 | --- | --- |
