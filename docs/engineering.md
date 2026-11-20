@@ -139,7 +139,9 @@ Operators use the [backend production runbook][key-operations] to issue a key.
 
 ## Releases
 
-Repository version comes from [VERSION](../VERSION). Keep [package.json](../package.json) and [package-lock.json](../package-lock.json) aligned. On a matching stable `vX.Y.Z` tag push, the [release workflow](../.github/workflows/release.yml) requires the commit to be on `main`'s history, builds both distributions, and publishes these assets together:
+Bump [VERSION](../VERSION) as well as the matching versions in [package.json](../package.json) and [package-lock.json](../package-lock.json), then merge to `main`. A push that changes `VERSION` on `main` starts the [release workflow](../.github/workflows/release.yml). CI builds the static ZIP from that exact commit and stores it as an Actions artifact before signing the OEM bundle.
+
+After both builds and OEM signing succeed, the same run creates the matching `vX.Y.Z` tag if it is missing and publishes the GitHub Release. An existing tag must point to the commit being packaged. An existing complete release is preserved. A matching manual tag push from `main` history also works. To release a version already on `main`, use **Actions → Publish self-hosted panel ZIP → Run workflow** on `main`. The workflow publishes these assets together:
 
 | Asset | Purpose |
 | --- | --- |
