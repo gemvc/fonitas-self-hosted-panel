@@ -6,7 +6,7 @@ import "./styles.css";
 
 const hostedSettings = "https://developerpannel.fonitas.com/settings/custom-domains";
 const secure = window.location.protocol === "https:";
-const pendingSession = completePanelSignIn();
+let pendingSession = completePanelSignIn();
 void pendingSession?.catch(() => {});
 
 type Text = typeof messages.en;
@@ -17,6 +17,7 @@ type AppPage = {
   last_page: number;
 };
 type PairingError = "invalidKey" | "rejectedKey" | "unavailable";
+type SignOutState = { status: "pending" | "failed"; token: string } | { status: "done" };
 
 function defaultLanguage(): Language {
   const preferred = localStorage.getItem("fonitas-panel-language") ?? navigator.language.split("-")[0];
@@ -29,6 +30,7 @@ function Panel() {
   const [checking, setChecking] = useState(pendingSession !== null);
   const [signingIn, setSigningIn] = useState(false);
   const [signInFailed, setSignInFailed] = useState(false);
+  const [signOutState, setSignOutState] = useState<SignOutState>();
   const endSession = useCallback(() => setSession(null), []);
   const t = messages[language];
 
@@ -43,7 +45,12 @@ function Panel() {
     let active = true;
     pendingSession.then(value => { if (active) setSession(value); }, () => {
       if (active) setSignInFailed(true);
-    }).finally(() => { if (active) setChecking(false); });
+    }).finally(() => {
+      if (active) {
+        pendingSession = null;
+        setChecking(false);
+      }
+    });
     return () => { active = false; };
   }, []);
 
@@ -59,6 +66,22 @@ function Panel() {
     void startPanelSignIn().catch(() => { setSigningIn(false); setSignInFailed(true); });
   }
 
+  async function signOut(token: string) {
+    endSession();
+    setSignOutState({ status: "pending", token });
+    try {
+      const response = await panelRequest("/session", {
+        method: "DELETE",
+        headers: { Authorization: "Bearer " + token },
+        keepalive: true,
+      });
+      if (response.status !== 204) throw new Error("Session revocation was not confirmed");
+      setSignOutState({ status: "done" });
+    } catch {
+      setSignOutState({ status: "failed", token });
+    }
+  }
+
   const languageMenu = (
     <select aria-label={language === "fa" ? "زبان" : language === "ar" ? "اللغة" : "Language"}
       value={language} onChange={event => setLanguage(event.target.value as Language)}>
@@ -69,13 +92,24 @@ function Panel() {
   );
 
   if (checking) return <main className="setup" role="status">{t.loading}</main>;
-  if (session) return <Applications token={session.access_token} endSession={endSession} t={t} menu={languageMenu} />;
+  if (session) return <Applications token={session.access_token} endSession={endSession} t={t} menu={languageMenu}
+    onSignOut={() => void signOut(session.access_token)} />;
 
   return (
     <main className="setup">
       <section className="card">
         <header className="bar"><strong>Fonitas</strong>{languageMenu}</header>
-        {secure && <button className="primary full" type="button" onClick={signIn} disabled={signingIn}>{t.signIn}</button>}
+        {signOutState?.status === "pending" && <p role="status">{t.signingOut}</p>}
+        {signOutState?.status === "done" && <div role="status">
+          <p>{t.signedOut}</p>
+          <p className="muted">{t.fonitasSession}</p>
+        </div>}
+        {signOutState?.status === "failed" && <div>
+          <p role="alert" className="error">{t.signOutFailed}</p>
+          <button type="button" onClick={() => void signOut(signOutState.token)}>{t.retrySignOut}</button>
+        </div>}
+        {secure && <button className="primary full" type="button" onClick={signIn}
+          disabled={signingIn || signOutState?.status === "pending"}>{t.signIn}</button>}
         {signInFailed && <p role="alert" className="error">{t.signInFailed}</p>}
         <Pairing t={t} />
       </section>
@@ -135,7 +169,9 @@ function Pairing({ t }: { t: Text }) {
   );
 }
 
-function Applications({ token, endSession, t, menu }: { token: string; endSession: () => void; t: Text; menu: ReactNode }) {
+function Applications({ token, endSession, onSignOut, t, menu }: {
+  token: string; endSession: () => void; onSignOut: () => void; t: Text; menu: ReactNode;
+}) {
   const [page, setPage] = useState(1);
   const [data, setData] = useState<AppPage>();
   const [failed, setFailed] = useState(false);
@@ -161,16 +197,11 @@ function Applications({ token, endSession, t, menu }: { token: string; endSessio
     setPage(next);
   }
 
-  function signOut() {
-    endSession();
-    void panelRequest("/session", { method: "DELETE", headers: { Authorization: "Bearer " + token } }).catch(() => {});
-  }
-
   return (
     <main className="workspace">
       <header className="bar">
         <strong>Fonitas</strong>
-        <div className="actions">{menu}<button type="button" onClick={signOut}>{t.signOut}</button></div>
+        <div className="actions">{menu}<button type="button" onClick={onSignOut}>{t.signOut}</button></div>
       </header>
       {data && <p className="muted">{data.organization}</p>}
       <h1>{t.applications}</h1>
