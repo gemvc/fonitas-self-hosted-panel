@@ -1,0 +1,36 @@
+:root {
+  font: 15px/1.5 system-ui, sans-serif;
+  color: #141414;
+  background: #fafafa;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+h1 { margin: 0.25rem 0 0.5rem; font-size: 1.65rem; line-height: 1.2; }
+p { margin: 0; }
+a { color: inherit; text-underline-offset: 0.2em; }
+button, input, select { font: inherit; }
+button, select, input { border: 1px solid #d7d7d7; border-radius: 0.5rem; padding: 0.5rem 0.75rem; background: #fff; color: inherit; }
+button, select { cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid #235cd8; outline-offset: 2px; }
+button.primary { background: #181818; color: #fff; border-color: #181818; }
+.full { width: 100%; }
+.setup { display: grid; min-height: 100svh; place-items: center; padding: 1rem; }
+.card, .applications { background: #fff; border: 1px solid #dedede; border-radius: 0.9rem; }
+.card { width: min(100%, 29rem); padding: 1.5rem; }
+.card > * + *, .pairing > * + *, form > * + * { margin-block-start: 0.8rem; }
+.pairing { border-block-start: 1px solid #e6e6e6; padding-block-start: 1rem; }
+.pairing a { display: inline-block; }
+label { display: grid; gap: 0.35rem; }
+.muted { color: #575757; }
+.origin, .applications li { overflow-wrap: anywhere; }
+.error { color: #a31321; }
+.bar, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.bar { justify-content: space-between; }
+.workspace { width: min(100%, 56rem); margin: 0 auto; padding: 2.25rem 1rem; }
+.workspace header { margin-block-end: 1.5rem; }
+.applications { list-style: none; margin: 1rem 0; padding: 0; overflow: hidden; }
+.applications li { padding: 1rem; }
+.applications li + li { border-block-start: 1px solid #e6e6e6; }
