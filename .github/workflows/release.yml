@@ -3,7 +3,6 @@ name: Publish self-hosted panel ZIP
 on:
   push:
     branches: [main]
-    paths: [VERSION]
     tags: ['v*']
   workflow_dispatch:
 
@@ -25,17 +24,11 @@ jobs:
         id: version
         shell: bash
         run: |
-          version="$(cat VERSION)"
-          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "VERSION must contain a stable semantic version."
-            exit 1
-          fi
-
-          tag="v$version"
+          tag="v$(bash scripts/resolve-release-version.sh)"
           if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == "refs/tags/$tag" ]]; then
             git merge-base --is-ancestor HEAD origin/main
           elif [[ "$GITHUB_REF" != refs/heads/main ]]; then
-            echo "Release from main or push a tag that matches VERSION."
+            echo "Release from main or push a tag that matches the resolved version."
             exit 1
           fi
 
@@ -62,24 +55,29 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Verify package versions
+      - name: Apply the resolved version to the build
         run: |
           node --input-type=module <<'JS'
-          import { readFileSync } from 'node:fs';
+          import { readFileSync, writeFileSync } from 'node:fs';
 
           const version = process.env.TAG.slice(1);
+          const baseVersion = readFileSync('VERSION', 'utf8').trim();
           const read = path => JSON.parse(readFileSync(path, 'utf8'));
           const pkg = read('package.json');
           const lock = read('package-lock.json');
-          if ([pkg.version, lock.version, lock.packages['']?.version].some(value => value !== version)) {
-            throw new Error('VERSION, package.json and package-lock.json must agree.');
+          if ([pkg.version, lock.version, lock.packages['']?.version].some(value => value !== baseVersion)) {
+            throw new Error('The base versions in VERSION, package.json and package-lock.json must agree.');
           }
+          pkg.version = lock.version = lock.packages[''].version = version;
+          writeFileSync('VERSION', version + '\n');
+          writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n');
           JS
       - run: npm ci
       - run: npm run build
       - name: Package panel at the archive root
         run: |
-          cp LICENSE dist/LICENSE
+          cp LICENSE VERSION dist/
           (cd dist && zip -qr ../fonitas-self-hosted-panel.zip .)
           unzip -tq fonitas-self-hosted-panel.zip
       - name: Retain the generated static ZIP
@@ -104,7 +102,7 @@ jobs:
         run: |
           if git show-ref --verify --quiet "refs/tags/$TAG"; then
             if [[ "$(git rev-parse "refs/tags/$TAG^{commit}")" != "$RELEASE_COMMIT" ]]; then
-              echo "$TAG already points to a different commit. Increment VERSION for new code."
+              echo "$TAG already points to a different commit. Check the release history and resolve the tag collision before publishing."
               exit 1
             fi
           else
