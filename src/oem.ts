@@ -6,7 +6,7 @@ const copy = {
   ar: { loading: "جارٍ التحميل…", unavailable: "لوحة التحكم غير متاحة.", support: "الدعم", status: "الحالة", title: "لوحة تحكم التطبيق" },
 };
 
-type Branding = { name: string; logo: string; accent: string; language: keyof typeof copy; support: string };
+type Branding = { name: string; logo: string; favicon?: string; accent: string; language: keyof typeof copy; support: string };
 type Application = { name: string; status: string };
 
 async function readDashboard<T>(view: "branding" | "application"): Promise<T> {
@@ -34,6 +34,13 @@ async function showDashboard() {
     if (branding.logo) {
       logo.src = branding.logo;
       logo.hidden = false;
+    }
+    if (branding.favicon) {
+      const icon = document.createElement("link");
+      icon.rel = "icon";
+      icon.type = "image/png";
+      icon.href = branding.favicon;
+      document.head.append(icon);
     }
     if (branding.support) {
       support.href = branding.support;

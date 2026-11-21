@@ -56,7 +56,7 @@ The current releases give software developers and authorized viewers a read-only
 | Application scope | An unbound installation lists applications in its organization. A bound installation lists only its selected application | One application selected in Custom Domains and enforced by Symfony |
 | Operator and viewer | Organizations manage domains and keys in the hosted portal. Active organization members can use static sign-in | An administrator uses the hosted portal for domain binding and a separate local management password for `/setup.php`. Viewers use the site's own authentication |
 
-`SoftwareApplication` represents the software shown in the dashboard. The binding uses its public UUID. Application name and status come from Symfony. OEM brand name, logo, accent, language, support URL, and permitted viewers are local configuration. Current dashboard routes provide an application summary. Customer licensing, billing, and support views are part of the [target product direction](#product-direction-for-the-oem-dashboard).
+`SoftwareApplication` represents the software shown in the dashboard. The binding uses its public UUID. Application name and status come from Symfony. OEM brand name, logo, favicon, accent, language, support URL, and permitted viewers are local configuration. Current dashboard routes provide an application summary. Customer licensing, billing, and support views are part of the [target product direction](#product-direction-for-the-oem-dashboard).
 
 ### Static trust flow
 
@@ -108,8 +108,9 @@ The app summary has `public_id`, `name`, `slug`, and `status`. For a bound insta
 | --- | --- | --- |
 | `POST /api/v1/developer-panels/oem/activate` | PHP only, exact `Origin` and JSON `connection_key` for a bound installation | `200`, `data.installation_token` (`fpi_…`) |
 | `GET /api/v1/developer-panels/oem/application` | PHP only, exact `Origin` and installation bearer | `200`, `data.application` with `public_id`, `name`, `slug`, and `status` |
-| `GET /index.php?view=branding` | OEM browser, host-authenticated allowlisted viewer | `200`, `name`, `logo`, `accent`, `language`, `support` |
+| `GET /index.php?view=branding` | OEM browser, host-authenticated allowlisted viewer | `200`, `name`, `logo`, optional `favicon`, `accent`, `language`, `support` |
 | `GET /index.php?view=application` | Same OEM viewer | `200`, `name` and `status` |
+| `GET /index.php?brand=logo` or `?brand=favicon` | Same OEM viewer | `200`, stored PNG for the requested role |
 | `GET /index.php?asset=…` | OEM browser, versioned allowlisted static bundle path | `200`, JavaScript or CSS from the active or previous release |
 
 The PHP runtime returns `403` for a viewer without permitted identity. It returns `503` when an application response is unavailable or invalid. Assets are checked before the viewer identity. Only the allowed versioned JS and CSS paths are served through that route. [OEM controller][panel-controller] · [OEM service][oem-service] · [Runtime code](../installer/setup.php)
@@ -154,7 +155,7 @@ php -l installer/setup.php
 
 1. Check the [published release assets][releases] for `setup.php`. Upload that generated installer to the document root of a dedicated HTTPS site with PHP 8.2 or later, cURL, ZIP, and OpenSSL. Configure `index.php` as the directory index. For a migration from static hosting, move the previous `index.html` outside the document root before setup. PHP must be able to create `index.php`.
 2. In [Custom Domains][custom-domains], request the exact origin with the intended application, or assign the application to the existing installation. Select **Show connection key**, then open `/setup.php`, paste the key, and choose a separate management password. Keep `setup.php` for settings, reconnect, and updates.
-3. Set the brand, language, and exact permitted user identities. Configure the site's authentication module to provide `REMOTE_USER` for both the root and `/index.php`. Confirm that the authorized viewer gets the intended app and another identity receives a denial.
+3. Enter the brand name and optionally upload PNG images for the logo and favicon. The logo accepts up to 1 MiB and 2048 pixels per side. The favicon accepts up to 64 KiB and 256 pixels per side. Set the language and exact permitted user identities under **Display and viewer settings**. Branding images are stored in the private installer directory and survive bundle updates and rollback. Existing installations keep their existing logo URL until a PNG is uploaded. Configure the site's authentication module to provide `REMOTE_USER` for both the root and `/index.php`. Confirm that the authorized viewer gets the intended app and another identity receives a denial.
 
 | Configuration | Owner and behavior |
 | --- | --- |

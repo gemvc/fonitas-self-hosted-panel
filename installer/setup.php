@@ -280,9 +280,70 @@ function panelField(string $name): string
     return is_string($value) ? trim($value) : '';
 }
 
-function panelBranding(): array
+function panelBrandImage(string $directory, string $field, int $maxBytes, int $maxSide): ?string
 {
-    $branding = ['name' => panelField('name'), 'logo' => panelField('logo'), 'accent' => panelField('accent'),
+    $file = $_FILES[$field] ?? null;
+    if ($file === null || ($file['error'] ?? null) === UPLOAD_ERR_NO_FILE) {
+        return null;
+    }
+    if (($file['error'] ?? null) !== UPLOAD_ERR_OK || !is_string($file['tmp_name'] ?? null)
+        || !is_uploaded_file($file['tmp_name'])) {
+        throw new RuntimeException('Could not upload the '.$field.' PNG.');
+    }
+
+    $bytes = file_get_contents($file['tmp_name'], length: $maxBytes + 1);
+    $image = $bytes === false ? false : @getimagesizefromstring($bytes);
+    if ($bytes === false || strlen($bytes) > $maxBytes || $image === false || $image[2] !== IMAGETYPE_PNG
+        || $image[0] < 1 || $image[1] < 1 || $image[0] > $maxSide || $image[1] > $maxSide) {
+        throw new RuntimeException('Upload a PNG for the '.$field.' that meets the size and dimension limits.');
+    }
+    $name = 'brand-'.hash('sha256', $bytes).'.png';
+    $path = $directory.'/'.$name;
+    if (!is_file($path)) {
+        $temporary = tempnam($directory, '.brand-');
+        if ($temporary === false) {
+            throw new RuntimeException('Could not store the '.$field.'.');
+        }
+        try {
+            if (file_put_contents($temporary, $bytes) !== strlen($bytes) || !rename($temporary, $path)) {
+                throw new RuntimeException('Could not store the '.$field.'.');
+            }
+        } finally {
+            if (is_file($temporary)) {
+                unlink($temporary);
+            }
+        }
+    }
+
+    return $name;
+}
+
+function panelBrandImages(string $directory, array $branding): array
+{
+    foreach (['logo' => [1_048_576, 2048], 'favicon' => [65_536, 256]] as $field => [$maxBytes, $maxSide]) {
+        $asset = panelBrandImage($directory, $field, $maxBytes, $maxSide);
+        if ($asset !== null) {
+            $branding[$field.'_file'] = $asset;
+        }
+    }
+
+    return $branding;
+}
+
+function panelPruneBrandImages(string $directory, array $branding): void
+{
+    $selected = [$branding['logo_file'] ?? null, $branding['favicon_file'] ?? null];
+    foreach (glob($directory.'/brand-*.png') ?: [] as $path) {
+        $name = basename($path);
+        if (preg_match('/\Abrand-[a-f0-9]{64}\.png\z/', $name) && !in_array($name, $selected, true)) {
+            @unlink($path);
+        }
+    }
+}
+
+function panelBranding(array $previous): array
+{
+    $branding = ['name' => panelField('name'), 'logo' => $previous['logo'] ?? '', 'accent' => panelField('accent'),
         'language' => panelField('language'), 'support' => panelField('support')];
     if ($branding['name'] === '' || strlen($branding['name']) > 120
         || !preg_match('/\A#[0-9a-fA-F]{6}\z/', $branding['accent']) || !in_array($branding['language'], ['en', 'fa', 'ar'], true)) {
@@ -296,7 +357,7 @@ function panelBranding(): array
         }
     }
 
-    return $branding;
+    return $branding + $previous;
 }
 
 function panelUsers(): array
@@ -356,6 +417,19 @@ function panelRuntime(array $state, string $directory): never
     if (!is_string($identity) || $identity === '' || !in_array($identity, $state['users'] ?? [], true)) {
         panelFail(403, 'You do not have access to this dashboard.');
     }
+    $brandAsset = $_GET['brand'] ?? null;
+    if ($brandAsset !== null) {
+        if (!in_array($brandAsset, ['logo', 'favicon'], true)) {
+            panelFail(404, 'File unavailable.');
+        }
+        $name = $state['branding'][$brandAsset.'_file'] ?? '';
+        if (!is_string($name) || !preg_match('/\Abrand-[a-f0-9]{64}\.png\z/', $name) || !is_file($directory.'/'.$name)) {
+            panelFail(404, 'File unavailable.');
+        }
+        header('Content-Type: image/png');
+        readfile($directory.'/'.$name);
+        exit;
+    }
     $view = $_GET['view'] ?? null;
     if ($view === 'application') {
         try {
@@ -370,7 +444,14 @@ function panelRuntime(array $state, string $directory): never
         }
     }
     if ($view === 'branding') {
-        panelJson($state['branding']);
+        $branding = $state['branding'];
+        foreach (['logo', 'favicon'] as $field) {
+            if (isset($branding[$field.'_file'])) {
+                $branding[$field] = '/index.php?brand='.$field;
+                unset($branding[$field.'_file']);
+            }
+        }
+        panelJson($branding);
     }
     $html = @file_get_contents($directory.'/'.$state['active'].'/oem.html');
     if ($view !== null || $html === false) {
@@ -408,10 +489,11 @@ function panelAction(string $directory, string $origin, array $state, string $ac
         if (strlen($password) < 16 || strlen($password) > 72) {
             throw new RuntimeException('Choose a management password between 16 and 72 bytes.');
         }
-        $branding = panelBranding();
+        $branding = panelBranding([]);
         $users = panelUsers();
         $created = panelInstallEntry();
         try {
+            $branding = panelBrandImages($directory, $branding);
             $active = panelStageRelease($directory, panelLatestRelease());
             $credential = panelActivate($origin, panelField('key'));
             panelSave($directory, [
@@ -458,8 +540,8 @@ function panelAction(string $directory, string $origin, array $state, string $ac
         return;
     }
     if ($action === 'settings') {
-        $state['branding'] = panelBranding();
         $state['users'] = panelUsers();
+        $state['branding'] = panelBrandImages($directory, panelBranding($state['branding']));
     } elseif ($action === 'update') {
         unset($_SESSION['releaseCheck']);
         $check = panelReleaseStatus();
@@ -488,7 +570,11 @@ function panelAction(string $directory, string $origin, array $state, string $ac
 function panelBrandingFields(array $brand, array $users): void
 {
     echo '<label>Brand name <input name="name" required maxlength="120" value="'.panelEscape($brand['name']).'"></label>';
-    echo '<label>Logo HTTPS URL <input name="logo" type="url" value="'.panelEscape($brand['logo']).'"></label>';
+    echo '<label>Logo PNG <input name="logo" type="file" accept="image/png"></label>';
+    echo '<small>Up to 1 MiB, 2048 × 2048 pixels.</small>';
+    echo '<label>Favicon PNG <input name="favicon" type="file" accept="image/png"></label>';
+    echo '<small>Up to 64 KiB, 256 × 256 pixels.</small>';
+    echo '<details><summary>Display and viewer settings</summary>';
     echo '<label>Support HTTPS URL <input name="support" type="url" value="'.panelEscape($brand['support']).'"></label>';
     echo '<label>Accent <input name="accent" type="color" value="'.panelEscape($brand['accent']).'"></label>';
     echo '<label>Language <select name="language">';
@@ -502,7 +588,8 @@ function panelBrandingFields(array $brand, array $users): void
 
 function panelForm(string $action): void
 {
-    echo '<form method="post" action="/setup.php"><input type="hidden" name="csrf" value="'.panelEscape($_SESSION['csrf']).'">';
+    $encoding = in_array($action, ['install', 'settings'], true) ? ' enctype="multipart/form-data"' : '';
+    echo '<form method="post" action="/setup.php"'.$encoding.'><input type="hidden" name="csrf" value="'.panelEscape($_SESSION['csrf']).'">';
     echo '<input type="hidden" name="action" value="'.panelEscape($action).'">';
 }
 
@@ -542,9 +629,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     try {
         $action = panelField('action');
         panelAction($directory, $origin, panelState($directory), $action);
+        if (in_array($action, ['install', 'settings'], true)) {
+            panelPruneBrandImages($directory, panelState($directory)['branding'] ?? []);
+        }
         header('Location: /setup.php'.($action === 'check-update' ? '' : '?saved=1'), true, 303);
         exit;
     } catch (RuntimeException $exception) {
+        if (in_array($action ?? '', ['install', 'settings'], true)) {
+            panelPruneBrandImages($directory, panelState($directory)['branding'] ?? []);
+        }
         $error = $exception->getMessage();
     } finally {
         fclose($lock);
