@@ -30,14 +30,14 @@ The dashboard gives software developers and authorized viewers a read-only view 
 
 ### Static trust flow
 
-1. A hosted organization admin submits the panel's HTTPS address. The stored origin includes the host and any non-default port, and the static callback uses the site root. A Fonitas operator issues a single-use connection key, valid for 15 minutes. The installation is stored in Symfony and survives frontend replacement. [Installation lifecycle][panels]
+1. A hosted organization admin submits the panel's HTTPS address. The stored origin includes the host and any non-default port, and the static callback uses the site root. Registration makes a single-use connection key available immediately. The key is valid for 15 minutes. The installation is stored in Symfony and survives frontend replacement. [Installation lifecycle][panels]
 2. The static UI submits the key to the pairing endpoint. The browser supplies its origin. Pairing acknowledges a connected installation, while user sign-in remains a separate step. [Static pairing UI](../src/main.tsx)
 3. The browser generates a state and a verifier, stores them in tab session storage, and sends the hex SHA-256 challenge to the hosted consent page. After consent, Symfony returns a URL on the registered origin with the one-time code and state in the fragment. The static client clears the fragment, validates state, and exchanges the code with the verifier. The code lasts 60 seconds. The panel bearer lasts 900 seconds and stays in memory. [Static sign-in client](../src/panel-login.ts) · [Session service][sessions]
 4. Data access is scoped by the bearer, request origin, active installation, active Fonitas Identity session, and active organization membership. Signing out revokes the panel bearer and leaves the hosted Fonitas session available for a later sign-in. [Session service][sessions] · [Static UI](../src/main.tsx)
 
 ### OEM trust flow
 
-1. The hosted admin selects a software application for the domain. Symfony validates that it belongs to the selected organization. The operator issues a connection key for the installation. PHP redeems it from the installed site and stores the installation credential. Symfony stores its hash. [Custom Domains page][hosted-domains] · [OEM service][oem-service]
+1. The hosted admin selects a software application for the domain. Symfony validates that it belongs to the selected organization. The registration issues a connection key for the installation. PHP redeems it from the installed site and stores the installation credential. Symfony stores its hash. [Custom Domains page][hosted-domains] · [OEM service][oem-service]
 2. The web server's authentication layer sets `REMOTE_USER`. PHP allows the HTML and JSON views only for exact identities listed by the installer admin. Setup uses its own origin-bound PHP session, management password hash, and form CSRF token. An empty viewer list denies access. Never derive `REMOTE_USER` from an untrusted browser header. [Installer, `panelSession` and `panelRuntime`](../installer/setup.php)
 3. PHP uses the stored exact origin and credential to read the bound application. Symfony checks the active organization and resolves ownership from the installation, regardless of any browser-supplied application identifier. PHP exposes only the fields used by the UI. Reassignment clears credentials and panel sessions. Revocation removes the installation. [OEM service][oem-service] · [Application ownership and summary][panel-applications] · [Installer runtime](../installer/setup.php)
 
@@ -116,14 +116,14 @@ php -l installer/setup.php
 ### Install the static ZIP
 
 1. Download and extract the [static ZIP][static-zip]. Put `index.html` and `assets/` directly at the root of the HTTPS domain.
-2. In [Custom Domains][custom-domains], select the organization and submit the panel's HTTPS address. After an operator issues the key, select **Show connection key** and copy it.
+2. In [Custom Domains][custom-domains], select the organization and submit the panel's HTTPS address. Select **Show connection key** and copy it.
 3. Paste the key into **Connect to Fonitas** on the custom domain. Select **Sign in with Fonitas**, sign in, and confirm the organization.
 4. For updates, replace the build in the same document root. The existing domain connection is held in Symfony.
 
 ### Install the PHP OEM dashboard
 
 1. Check the [published release assets][releases] for `setup.php`. Upload that generated installer to the document root of a dedicated HTTPS site with PHP 8.2 or later, cURL, ZIP, and OpenSSL. Configure `index.php` as the directory index. For a migration from static hosting, move the previous `index.html` outside the document root before setup. PHP must be able to create `index.php`.
-2. In [Custom Domains][custom-domains], request the exact origin with the intended application, or assign the application to the existing installation. After the operator issues the connection key, open `/setup.php`, paste the key, and choose a separate management password. Keep `setup.php` for settings, reconnect, and updates.
+2. In [Custom Domains][custom-domains], request the exact origin with the intended application, or assign the application to the existing installation. Select **Show connection key**, then open `/setup.php`, paste the key, and choose a separate management password. Keep `setup.php` for settings, reconnect, and updates.
 3. Set the brand, language, and exact permitted user identities. Configure the site's authentication module to provide `REMOTE_USER` for both the root and `/index.php`. Confirm that the authorized viewer gets the intended app and another identity receives a denial.
 
 | Configuration | Owner and behavior |
@@ -135,7 +135,7 @@ php -l installer/setup.php
 
 The management page automatically checks the signed release manifest when an administrator opens it. It shows the installed version and any newer release. **Check again** refreshes the result. The ZIP is downloaded only after the administrator selects **Install version**. If the release or installed version changes before confirmation, review the new result and confirm again. Use **Restore previous version** to roll back a successful update. The update replaces the dashboard bundle. To update an older copy of the PHP installer itself, replace `setup.php` with the one from the published assets.
 
-Operators use the [backend production runbook][key-operations] to issue a key.
+For an expired key or an older request without a key, select **Get connection key** on its installation row.
 
 **Troubleshooting.** A rejected key can be expired, already consumed, issued for another origin, or missing the app binding required for OEM. Use the Custom Domains request or reconnect flow and the current key. A viewer's `403` calls for checking the web-server identity and the exact allowlist value. If a viewer can load the shell but the application is unavailable, check the installation credential, binding, and backend deployment. [Installer](../installer/setup.php) · [OEM service][oem-service]
 
@@ -183,7 +183,6 @@ When sources disagree, inspect producer and consumer at the relevant Git refs an
 [panel-applications]: https://github.com/gemvc/symfony_fonitas/blob/main/src/Organization/Application/DeveloperPanel/DeveloperPanelApplications.php
 [migration]: https://github.com/gemvc/symfony_fonitas/blob/main/migrations/organization/Version20261120150000.php
 [backend-organization]: https://github.com/gemvc/symfony_fonitas/blob/main/docs/domains/organization.md#self-hosted-developer-panels
-[key-operations]: https://github.com/gemvc/symfony_fonitas/blob/main/docs/02-production-operations.md#issue-a-developer-panel-connection-key-manually
 [backend-db]: https://github.com/gemvc/symfony_fonitas/blob/main/docs/03-database-operations.md
 [backend-tests]: https://github.com/gemvc/symfony_fonitas/blob/main/tests/Organization/Presentation/Http/Rest/DeveloperPanelControllerTest.php
 [custom-domains]: https://developerpannel.fonitas.com/settings/custom-domains
