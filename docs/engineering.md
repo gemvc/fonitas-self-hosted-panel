@@ -168,7 +168,22 @@ The management page automatically checks the signed release manifest when an adm
 
 For an expired key or an older request without a key, select **Get connection key** on its installation row.
 
-**Troubleshooting.** A rejected key can be expired, already consumed, issued for another origin, or missing the app binding required for OEM. Use the Custom Domains request or reconnect flow and the current key. A viewer's `403` calls for checking the web-server identity and the exact allowlist value. If a viewer can load the shell but the application is unavailable, check the installation credential, binding, and backend deployment. [Installer](../installer/setup.php) · [OEM service][oem-service]
+### Troubleshoot the PHP OEM dashboard
+
+| Symptom | What to check |
+| --- | --- |
+| The installer rejects the connection key | In **Custom Domains**, check the exact HTTPS origin and the application binding. Generate a new key if the previous key has expired or been used. |
+| The logo upload asks for a PNG within the limits | Check that the image content is actually PNG. The logo limit is 1 MiB and 2048 pixels per side. The favicon has its own limit of 64 KiB and 256 pixels per side. Both are optional at installation and can be added in setup later. |
+| The dashboard shows `403` and **You do not have access to this dashboard.** | The PHP viewer guard received an empty or unlisted `REMOTE_USER`. Check the host's authentication and the exact identity saved in **Display and viewer settings → Authorized users**. |
+| The dashboard opens and the application is unavailable | Check the installation credential, application binding, and backend response. [OEM service][oem-service] |
+
+For the viewer `403`, check that the host authenticates the dashboard request and passes its authenticated identity to PHP as `REMOTE_USER` on both `/` and `/index.php`. If the hosting panel offers **Directory Privacy** or HTTP Basic Auth, confirm that the host forwards the resulting username to PHP. In `/setup.php`, sign in with the installation management password, open **Display and viewer settings**, and save that exact identity in **Authorized users**, one per line. Verify with an allowed identity and a separate unauthenticated or unlisted session. The connection key is used during activation and reconnection. Editing the viewer list does not require reinstalling or issuing another key. [PHP runtime and settings](../installer/setup.php)
+
+### Resume OEM customer sign-in work
+
+The last reported check on `dashboard.infrasible.com` showed the PHP viewer guard's `403` after `v0.3.5` was published. The host's authenticated identity and successful dashboard access have not been confirmed.
+
+The next implementation is the Fonitas account flow in [Product direction](#product-direction-for-the-oem-dashboard). Add hosted authorization for the first installation and customer sessions for the bound application. Before switching viewer access, verify that an entitled customer can sign in and a customer without an entitlement to that application cannot access its protected data. The current organization-member sign-in route requires an already connected installation. [Current session service][sessions]
 
 ## Releases
 

@@ -11,7 +11,7 @@ The current releases provide a read-only application view. The static ZIP uses F
 
 ## Branded PHP dashboard
 
-[PHP installer, hosting requirements, and identity setup](docs/engineering.md#install-the-php-oem-dashboard)
+[PHP installer, hosting requirements, and identity setup](docs/engineering.md#install-the-php-oem-dashboard) · [Troubleshoot viewer access](docs/engineering.md#troubleshoot-the-php-oem-dashboard)
 
 ## Build
 
