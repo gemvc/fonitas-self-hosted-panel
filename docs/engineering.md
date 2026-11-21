@@ -31,6 +31,15 @@ Fonitas is a software publishing platform. The developer operates a branded dash
 
 Fonitas supplies identity, purchasing and payments, licensing, invoices, support tickets, business email, and reporting. The self-hosted dashboard is the branded interface for those services. Customer and developer views use the permissions of the signed-in person. Symfony remains the authority for ownership, entitlement, and business records.
 
+### First milestone: customer registration from the app site
+
+The app's own website starts registration. Fonitas creates and verifies the account on its hosted identity surface. A person who already has a Fonitas account signs in with it. When the authenticated flow completes, Fonitas resolves the application and its owning company from the registered installation, records the customer relationship, and returns the person to that application's registered HTTPS origin.
+
+- Record the relationship for the verified identity and the registered application once. A repeat sign-in or callback must reuse the same relationship.
+- Resolve the owning company from the application binding. A browser-supplied company or application identifier does not establish authorization.
+- The customer relationship identifies the buyer in the application. A purchase or license entitlement governs access to paid features.
+- This milestone is planned. The current customer PHP entry point checks installation readiness. [Customer PHP backend](#customer-only-php-backend)
+
 ### Future installation and branding
 
 The customer backend initially uses private environment configuration and an existing installation credential. The hosted administrator onboarding below is a later improvement.
@@ -234,7 +243,7 @@ For the viewer `403`, check that the host authenticates the dashboard request an
 
 The last reported check on `dashboard.infrasible.com` showed the PHP viewer guard's `403` after `v0.3.5` was published. The host's authenticated identity and successful dashboard access have not been confirmed.
 
-Continue from the [customer PHP foundation](#customer-only-php-backend). First add the Fonitas customer sign-in and the Symfony contract that checks both the signed-in buyer and the application bound to the installation. Then wire the PHP routes and build the customer frontend. Verify that an entitled buyer can sign in and see their purchases and licenses, and that other buyers and applications stay isolated. The existing organization-member sign-in is for the developer dashboard. The existing buyer-purchase route authenticates the buyer but does not apply the OEM installation's app binding. [Organization session service][sessions] · [Buyer purchases API](https://github.com/gemvc/symfony_fonitas/blob/main/src/License/Presentation/Http/Rest/BuyerPurchasesController.php)
+Continue from the [customer PHP foundation](#customer-only-php-backend). Start with [customer registration from the app site](#first-milestone-customer-registration-from-the-app-site). Then add the Symfony contract that checks both the signed-in buyer and the application bound to the installation. Then wire the PHP routes and build the customer frontend. Verify that an entitled buyer can sign in and see their purchases and licenses, and that other buyers and applications stay isolated. The existing organization-member sign-in is for the developer dashboard. The existing buyer-purchase route authenticates the buyer but does not apply the OEM installation's app binding. [Organization session service][sessions] · [Buyer purchases API](https://github.com/gemvc/symfony_fonitas/blob/main/src/License/Presentation/Http/Rest/BuyerPurchasesController.php)
 
 ## Releases
 
