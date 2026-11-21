@@ -23,12 +23,21 @@ function panelEscape(string $value): string
 
 function panelOrigin(): string
 {
-    $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
+    $authority = preg_replace('~:443\z~', '', strtolower($_SERVER['HTTP_HOST'] ?? ''));
     $configured = getenv('PANEL_ORIGIN');
-    $origin = $configured === false ? 'https://'.$host : $configured;
+    $origin = $configured === false ? 'https://'.$authority : $configured;
     $https = in_array(strtolower($_SERVER['HTTPS'] ?? ''), ['on', '1'], true);
-    if (strlen($origin) > 261 || !preg_match('~\Ahttps://(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*\z~D', $origin)
-        || substr($origin, 8) !== $host || (!$https && $configured === false)) {
+    if (strlen($origin) > 268 || preg_match('~\Ahttps://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?\z~', $origin, $parts) !== 1
+        || substr($origin, 8) !== $authority || (!$https && $configured === false)) {
+        panelFail(400, 'Open this panel through its configured HTTPS address.');
+    }
+
+    $host = $parts[1];
+    $port = isset($parts[2]) ? (int) $parts[2] : 443;
+    $validHost = str_starts_with($host, '[')
+        ? filter_var(substr($host, 1, -1), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false
+        : filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) !== false;
+    if (!$validHost || $port < 1 || $port > 65535) {
         panelFail(400, 'Open this panel through its configured HTTPS address.');
     }
 

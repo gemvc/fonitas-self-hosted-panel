@@ -30,7 +30,7 @@ The dashboard gives software developers and authorized viewers a read-only view 
 
 ### Static trust flow
 
-1. A hosted organization admin requests an exact custom HTTPS origin. A Fonitas operator issues a single-use connection key, valid for 15 minutes. The installation is stored in Symfony and survives frontend replacement. [Installation lifecycle][panels]
+1. A hosted organization admin submits the panel's HTTPS address. The stored origin includes the host and any non-default port, and the static callback uses the site root. A Fonitas operator issues a single-use connection key, valid for 15 minutes. The installation is stored in Symfony and survives frontend replacement. [Installation lifecycle][panels]
 2. The static UI submits the key to the pairing endpoint. The browser supplies its origin. Pairing acknowledges a connected installation, while user sign-in remains a separate step. [Static pairing UI](../src/main.tsx)
 3. The browser generates a state and a verifier, stores them in tab session storage, and sends the hex SHA-256 challenge to the hosted consent page. After consent, Symfony returns a URL on the registered origin with the one-time code and state in the fragment. The static client clears the fragment, validates state, and exchanges the code with the verifier. The code lasts 60 seconds. The panel bearer lasts 900 seconds and stays in memory. [Static sign-in client](../src/panel-login.ts) · [Session service][sessions]
 4. Data access is scoped by the bearer, request origin, active installation, active Fonitas Identity session, and active organization membership. Signing out revokes the panel bearer and leaves the hosted Fonitas session available for a later sign-in. [Session service][sessions] · [Static UI](../src/main.tsx)
@@ -116,7 +116,7 @@ php -l installer/setup.php
 ### Install the static ZIP
 
 1. Download and extract the [static ZIP][static-zip]. Put `index.html` and `assets/` directly at the root of the HTTPS domain.
-2. In [Custom Domains][custom-domains], select the organization and request the exact HTTPS origin. After an operator issues the key, select **Show connection key** and copy it.
+2. In [Custom Domains][custom-domains], select the organization and submit the panel's HTTPS address. After an operator issues the key, select **Show connection key** and copy it.
 3. Paste the key into **Connect to Fonitas** on the custom domain. Select **Sign in with Fonitas**, sign in, and confirm the organization.
 4. For updates, replace the build in the same document root. The existing domain connection is held in Symfony.
 
