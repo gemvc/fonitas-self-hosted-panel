@@ -1,6 +1,6 @@
 # Fonitas Self-Hosted Developer Panel
 
-Run a software dashboard on your own HTTPS domain. The [product direction](docs/engineering.md#product-direction-for-the-oem-dashboard) defines a branded customer dashboard for one registered application and the developer's Fonitas business tools.
+Run a software dashboard on your own HTTPS domain. The [product direction](docs/engineering.md#product-direction-for-the-oem-dashboard) defines a branded customer dashboard for one registered application with purchases and licenses for signed-in customers.
 
 The current releases provide a read-only application view. The static ZIP uses Fonitas sign-in for organization members. The branded PHP dashboard shows one bound application and uses the host's sign-in.
 
@@ -12,6 +12,10 @@ The current releases provide a read-only application view. The static ZIP uses F
 ## Branded PHP dashboard
 
 [PHP installer, hosting requirements, and identity setup](docs/engineering.md#install-the-php-oem-dashboard) · [Troubleshoot viewer access](docs/engineering.md#troubleshoot-the-php-oem-dashboard)
+
+## Customer PHP backend
+
+[Configure the customer-only backend and check the application binding](docs/engineering.md#customer-only-php-backend). The source checkout contains the readiness route. Customer sign-in and purchase and license views are planned.
 
 ## Build
 
