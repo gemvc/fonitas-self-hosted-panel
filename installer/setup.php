@@ -373,9 +373,6 @@ function panelUsers(): array
 function panelInstallEntry(): bool
 {
     $entry = __DIR__.'/index.php';
-    if (is_file(__DIR__.'/index.html')) {
-        throw new RuntimeException('Move the existing index.html outside this document root before installing the dashboard.');
-    }
     if (is_link($entry) || (file_exists($entry) && (!is_file($entry) || file_get_contents($entry) !== PANEL_INDEX))) {
         throw new RuntimeException('This document root already has an index.php. Use a dedicated site.');
     }
@@ -394,6 +391,31 @@ function panelInstallEntry(): bool
     }
 
     return true;
+}
+
+function panelBackupStaticIndex(string $directory): ?string
+{
+    $path = __DIR__.'/index.html';
+    if (!file_exists($path) && !is_link($path)) {
+        return null;
+    }
+    $html = is_file($path) && !is_link($path) ? @file_get_contents($path, length: 65537) : false;
+    if ($html === false || strlen($html) > 65536
+        || !str_contains($html, '<title>Fonitas Developer Panel</title>')
+        || !preg_match('~<script\b[^>]*\bsrc=["\x27](?:/|\./)?assets/index-[A-Za-z0-9_-]+\.js["\x27]~i', $html)
+        || !preg_match('~<div\b[^>]*\bid=["\x27]root["\x27]~i', $html)) {
+        throw new RuntimeException('This document root contains an unrecognized index.html. Use a dedicated site.');
+    }
+
+    $backup = $directory.'/legacy-index.html';
+    if (file_exists($backup) || is_link($backup)) {
+        throw new RuntimeException('A static dashboard backup already exists. Keep it in another private location before retrying.');
+    }
+    if (!@rename($path, $backup)) {
+        throw new RuntimeException('Could not move the old dashboard into the private data directory.');
+    }
+
+    return $backup;
 }
 
 function panelRuntime(array $state, string $directory): never
@@ -491,10 +513,13 @@ function panelAction(string $directory, string $origin, array $state, string $ac
         }
         $branding = panelBranding([]);
         $users = panelUsers();
-        $created = panelInstallEntry();
+        $created = false;
+        $staticBackup = null;
         try {
             $branding = panelBrandImages($directory, $branding);
             $active = panelStageRelease($directory, panelLatestRelease());
+            $created = panelInstallEntry();
+            $staticBackup = panelBackupStaticIndex($directory);
             $credential = panelActivate($origin, panelField('key'));
             panelSave($directory, [
                 'origin' => $origin, 'password' => password_hash($password, PASSWORD_DEFAULT), 'credential' => $credential,
@@ -503,6 +528,10 @@ function panelAction(string $directory, string $origin, array $state, string $ac
         } catch (Throwable $exception) {
             if ($created) {
                 @unlink(__DIR__.'/index.php');
+            }
+            if ($staticBackup !== null && (file_exists(__DIR__.'/index.html') || is_link(__DIR__.'/index.html')
+                || !@rename($staticBackup, __DIR__.'/index.html'))) {
+                throw new RuntimeException('Installation failed. The old dashboard is still backed up as legacy-index.html in the private data directory.', previous: $exception);
             }
             throw $exception;
         }
