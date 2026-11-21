@@ -42,3 +42,28 @@ label { display: grid; gap: 0.35rem; }
 #dashboard #logo {
   object-fit: contain;
 }
+
+.role-home > * + *, .panel-section > * + * { margin-block-start: 0.85rem; }
+.role-home h2 { margin: 0; font-size: 1.05rem; }
+.stat-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  margin-block: 1.25rem;
+}
+.stat {
+  background: #fff;
+  border: 1px solid #dedede;
+  border-radius: 0.9rem;
+  padding: 1rem;
+}
+.stat-value { font-size: 1.45rem; font-weight: 600; margin-block-start: 0.25rem; }
+.panel-section { margin-block-start: 1.5rem; }
+.hosted-link { margin-block-start: 1.5rem; }
+.detail-list { display: grid; gap: 0.65rem; margin: 0; }
+.detail-list div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem; }
+.detail-list dt { color: #575757; }
+.detail-list dd { margin: 0; }
+.preview-roles { display: grid; gap: 0.5rem; border-block-start: 1px solid #e6e6e6; padding-block-start: 1rem; }
+.preview-roles .actions { justify-content: stretch; }
+.preview-roles button { flex: 1; }

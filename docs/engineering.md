@@ -58,6 +58,18 @@ The current releases give software developers and authorized viewers a read-only
 
 `SoftwareApplication` represents the software shown in the dashboard. The binding uses its public UUID. Application name and status come from Symfony. OEM brand name, logo, favicon, accent, language, support URL, and permitted viewers are local configuration. Current dashboard routes provide an application summary. Customer licensing, billing, and support views are part of the [target product direction](#product-direction-for-the-oem-dashboard).
 
+### Local role workspaces (static UI)
+
+The static React client is the local frontend for the bound application on the developer site or subdomain. Fonitas-hosted surfaces stay minimal for day-to-day use: organization domain binding, connection keys, and deep administration remain on the hosted portal. Local role homes own overview charts and lists, support tickets, and customer purchases.
+
+| Role key | Local UI | Hosted Fonitas |
+| --- | --- | --- |
+| `application_admin` | Overview charts, summaries, and lists | Deep administration and domain/key management |
+| `application_support` | Ticket inbox and replies | — |
+| `application_customer` | Purchases, license type and dates, upgrade entry | — |
+
+Additional roles may arrive later. Register them in [`src/roles.ts`](../src/roles.ts); unknown role keys from the API stay inert until registered. After sign-in the client loads identity from `GET /api/v1/developer-panels/session/me` (`data.display_name`, `data.roles`, `data.permissions`). **This route is the UI contract and is not verified against Symfony yet.** Permissions will gate actions when those APIs ship; roles select the default home. The previous paginated applications list is no longer the signed-in home.
+
 ### Static trust flow
 
 1. A hosted organization admin submits the panel's HTTPS address. The stored origin includes the host and any non-default port, and the static callback uses the site root. Registration makes a single-use connection key available immediately. The key is valid for 15 minutes. The installation is stored in Symfony and survives frontend replacement. [Installation lifecycle][panels]

@@ -1,7 +1,10 @@
-import { StrictMode, useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { StrictMode, useCallback, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { messages, type Language } from "./locale";
 import { completePanelSignIn, panelRequest, startPanelSignIn, type PanelSession } from "./panel-login";
+import { setPreviewMe } from "./panel-me";
+import { ROLE_KEYS, type KnownRoleKey } from "./roles";
+import { Workspace } from "./workspace";
 import "./styles.css";
 
 const hostedSettings = "https://developerpannel.fonitas.com/settings/custom-domains";
@@ -10,14 +13,14 @@ let pendingSession = completePanelSignIn();
 void pendingSession?.catch(() => {});
 
 type Text = typeof messages.en;
-type AppPage = {
-  organization: string;
-  applications: { public_id: string; name: string; slug: string; status: string }[];
-  page: number;
-  last_page: number;
-};
 type PairingError = "invalidKey" | "rejectedKey" | "unavailable";
 type SignOutState = { status: "pending" | "failed"; token: string } | { status: "done" };
+
+const rolePreviewLabel: Record<KnownRoleKey, keyof Text> = {
+  application_admin: "roleAdmin",
+  application_support: "roleSupport",
+  application_customer: "roleCustomer",
+};
 
 function defaultLanguage(): Language {
   const preferred = localStorage.getItem("fonitas-panel-language") ?? navigator.language.split("-")[0];
@@ -31,7 +34,10 @@ function Panel() {
   const [signingIn, setSigningIn] = useState(false);
   const [signInFailed, setSignInFailed] = useState(false);
   const [signOutState, setSignOutState] = useState<SignOutState>();
-  const endSession = useCallback(() => setSession(null), []);
+  const endSession = useCallback(() => {
+    setPreviewMe(null);
+    setSession(null);
+  }, []);
   const t = messages[language];
 
   useEffect(() => {
@@ -67,7 +73,12 @@ function Panel() {
   }
 
   async function signOut(token: string) {
+    const preview = import.meta.env.DEV && token === "preview";
     endSession();
+    if (preview) {
+      setSignOutState({ status: "done" });
+      return;
+    }
     setSignOutState({ status: "pending", token });
     try {
       const response = await panelRequest("/session", {
@@ -82,6 +93,17 @@ function Panel() {
     }
   }
 
+  function previewRole(role: KnownRoleKey) {
+    setSignInFailed(false);
+    setSignOutState(undefined);
+    setPreviewMe({
+      display_name: "Preview user",
+      roles: [role],
+      permissions: [],
+    });
+    setSession({ access_token: "preview", expires_in: 3_600 });
+  }
+
   const languageMenu = (
     <select aria-label={language === "fa" ? "زبان" : language === "ar" ? "اللغة" : "Language"}
       value={language} onChange={event => setLanguage(event.target.value as Language)}>
@@ -92,7 +114,7 @@ function Panel() {
   );
 
   if (checking) return <main className="setup" role="status">{t.loading}</main>;
-  if (session) return <Applications token={session.access_token} endSession={endSession} t={t} menu={languageMenu}
+  if (session) return <Workspace token={session.access_token} endSession={endSession} t={t} menu={languageMenu}
     onSignOut={() => void signOut(session.access_token)} />;
 
   return (
@@ -112,6 +134,16 @@ function Panel() {
           disabled={signingIn || signOutState?.status === "pending"}>{t.signIn}</button>}
         {signInFailed && <p role="alert" className="error">{t.signInFailed}</p>}
         <Pairing t={t} />
+        {import.meta.env.DEV && (
+          <section className="preview-roles">
+            <p className="muted">{t.previewRoles}</p>
+            <div className="actions">
+              {ROLE_KEYS.map(role => (
+                <button key={role} type="button" onClick={() => previewRole(role)}>{t[rolePreviewLabel[role]]}</button>
+              ))}
+            </div>
+          </section>
+        )}
       </section>
     </main>
   );
@@ -166,68 +198,6 @@ function Pairing({ t }: { t: Text }) {
       ) : <p role="alert" className="error">{t.https}</p>}
       <a href={hostedSettings} target="_blank" rel="noopener noreferrer">{connected ? t.manage : t.getKey}</a>
     </section>
-  );
-}
-
-function Applications({ token, endSession, onSignOut, t, menu }: {
-  token: string; endSession: () => void; onSignOut: () => void; t: Text; menu: ReactNode;
-}) {
-  const [page, setPage] = useState(1);
-  const [data, setData] = useState<AppPage>();
-  const [failed, setFailed] = useState(false);
-  const [retry, setRetry] = useState(0);
-
-  useEffect(() => {
-    let active = true;
-    panelRequest("/session/applications?" + new URLSearchParams({ page: String(page) }), {
-      headers: { Authorization: "Bearer " + token },
-    }).then(async response => {
-      if (!active) return;
-      if ([401, 403, 404].includes(response.status)) { endSession(); return; }
-      if (!response.ok) throw new Error("Failed to load applications");
-      const { data } = await response.json() as { data: AppPage };
-      if (active) setData(data);
-    }).catch(() => { if (active) setFailed(true); });
-    return () => { active = false; };
-  }, [token, page, retry, endSession]);
-
-  function goTo(next: number) {
-    setFailed(false);
-    setData(undefined);
-    setPage(next);
-  }
-
-  return (
-    <main className="workspace">
-      <header className="bar">
-        <strong>Fonitas</strong>
-        <div className="actions">{menu}<button type="button" onClick={onSignOut}>{t.signOut}</button></div>
-      </header>
-      {data && <p className="muted">{data.organization}</p>}
-      <h1>{t.applications}</h1>
-      {!data && !failed && <p role="status">{t.loading}</p>}
-      {failed && <div role="alert">
-        <p className="error">{t.unavailable}</p>
-        <button type="button" onClick={() => { setFailed(false); setRetry(value => value + 1); }}>{t.retry}</button>
-      </div>}
-      {data && (data.applications.length ? (
-        <ul className="applications">
-          {data.applications.map(app => (
-            <li className="bar" key={app.public_id}>
-              <div><strong>{app.name}</strong><p className="muted"><bdi>{app.slug}</bdi></p></div>
-              <p className="muted"><bdi>{app.status.replaceAll("_", " ")}</bdi></p>
-            </li>
-          ))}
-        </ul>
-      ) : <p className="muted">{t.empty}</p>)}
-      {data && data.last_page > 1 && (
-        <nav className="actions">
-          <button disabled={page <= 1} onClick={() => goTo(page - 1)}>{t.previous}</button>
-          <bdi>{page} / {data.last_page}</bdi>
-          <button disabled={page >= data.last_page} onClick={() => goTo(page + 1)}>{t.next}</button>
-        </nav>
-      )}
-    </main>
   );
 }
 
