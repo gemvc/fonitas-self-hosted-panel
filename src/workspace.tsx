@@ -4,14 +4,14 @@ import { loadPanelMe, SessionEndedError, type PanelMe } from "./panel-me";
 import { AdminHome } from "./pages/admin-home";
 import { CustomerHome } from "./pages/customer-home";
 import { SupportHome } from "./pages/support-home";
-import { defaultRole, isKnownRole, knownRolesFrom, type KnownRoleKey } from "./roles";
+import { defaultHome, homesFrom, isWorkspaceHome, type WorkspaceHome } from "./roles";
 
 type Text = typeof messages.en;
 
-const roleLabel: Record<KnownRoleKey, keyof Text> = {
-  application_admin: "roleAdmin",
-  application_support: "roleSupport",
-  application_customer: "roleCustomer",
+const homeLabel: Record<WorkspaceHome, keyof Text> = {
+  admin: "roleAdmin",
+  support: "roleSupport",
+  customer: "roleCustomer",
 };
 
 export function Workspace({
@@ -30,8 +30,8 @@ export function Workspace({
   const [me, setMe] = useState<PanelMe>();
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
-  const [activeRole, setActiveRole] = useState<KnownRoleKey | null>(null);
-  const available = me ? knownRolesFrom(me.roles) : [];
+  const [activeHome, setActiveHome] = useState<WorkspaceHome | null>(null);
+  const available = me ? homesFrom(me) : [];
 
   useEffect(() => {
     let active = true;
@@ -40,10 +40,8 @@ export function Workspace({
     loadPanelMe(token).then(identity => {
       if (!active) return;
       setMe(identity);
-      setActiveRole(current => {
-        if (current && identity.roles.includes(current)) return current;
-        return defaultRole(identity.roles);
-      });
+      const homes = homesFrom(identity);
+      setActiveHome(current => (current && homes.includes(current) ? current : defaultHome(identity)));
     }, error => {
       if (!active) return;
       if (error instanceof SessionEndedError) endSession();
@@ -60,14 +58,14 @@ export function Workspace({
           {available.length > 1 && (
             <select
               aria-label={t.roleSwitch}
-              value={activeRole ?? ""}
+              value={activeHome ?? ""}
               onChange={event => {
                 const value = event.target.value;
-                if (isKnownRole(value)) setActiveRole(value);
+                if (isWorkspaceHome(value)) setActiveHome(value);
               }}
             >
-              {available.map(role => (
-                <option key={role} value={role}>{t[roleLabel[role]]}</option>
+              {available.map(home => (
+                <option key={home} value={home}>{t[homeLabel[home]]}</option>
               ))}
             </select>
           )}
@@ -83,10 +81,10 @@ export function Workspace({
           <button type="button" onClick={() => setRetry(value => value + 1)}>{t.retry}</button>
         </div>
       )}
-      {me && !activeRole && <p className="muted">{t.noRole}</p>}
-      {me && activeRole === "application_admin" && <AdminHome t={t} displayName={me.display_name} />}
-      {me && activeRole === "application_support" && <SupportHome t={t} displayName={me.display_name} />}
-      {me && activeRole === "application_customer" && <CustomerHome t={t} displayName={me.display_name} />}
+      {me && !activeHome && <p className="muted">{t.noRole}</p>}
+      {me && activeHome === "admin" && <AdminHome t={t} displayName={me.display_name} />}
+      {me && activeHome === "support" && <SupportHome t={t} displayName={me.display_name} />}
+      {me && activeHome === "customer" && <CustomerHome t={t} displayName={me.display_name} />}
     </main>
   );
 }

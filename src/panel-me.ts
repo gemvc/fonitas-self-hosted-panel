@@ -1,8 +1,9 @@
 import { panelRequest } from "./panel-login";
 
 /**
- * Panel identity after sign-in.
- * Backend contract is not verified in Symfony yet — treat as the UI contract this client expects.
+ * Application identity after sign-in.
+ * Shape matches Identity `GET /api/v1/auth/me` (`display_name`, `roles`, `permissions`).
+ * Developer-panel bearer session does not expose this yet — wiring is unverified.
  */
 export type PanelMe = {
   display_name: string;

@@ -7,6 +7,7 @@ This handbook is the repository's reference for architecture, API discovery, dev
 | Task | Owning component | Entry point |
 | --- | --- | --- |
 | Change the static ZIP dashboard, pairing, or Fonitas sign-in | This repository, React and TypeScript | [index.html](../index.html), [main.tsx](../src/main.tsx), [panel-login.ts](../src/panel-login.ts) |
+| Change local workspace homes or Identity role mapping | This repository, React and TypeScript | [roles.ts](../src/roles.ts), [workspace.tsx](../src/workspace.tsx), [panel-me.ts](../src/panel-me.ts), [pages/](../src/pages/) |
 | Change OEM branding or the application summary | This repository, HTML and TypeScript | [oem.html](../oem.html), [oem.ts](../src/oem.ts), shared [styles.css](../src/styles.css) |
 | Change OEM setup, configuration, access, or updates | This repository, server-side PHP | [installer/setup.php](../installer/setup.php), especially `panelAction`, `panelRuntime`, `panelLatestRelease`, and `panelStageRelease` |
 | Change the organization admin's domain workflow | Hosted developer portal | [Custom Domains page][hosted-domains] |
@@ -22,13 +23,17 @@ This section defines the target product. The customer and developer workflows be
 
 Fonitas is a software publishing platform. The developer operates a branded dashboard on an HTTPS origin for one registered software application. A purchase associates the customer's Fonitas identity with that application through the purchase or license entitlement. The buyer is a direct customer of the software and uses Fonitas business services through the developer's brand. The developer uses those same services to run the software business.
 
-| Actor | Purpose | Access boundary |
-| --- | --- | --- |
-| Organization administrator | Install and manage the dashboard for a registered application | The organization owns the application and the installation is registered to its HTTPS origin |
-| Application customer | Sign in with a Fonitas account and see purchases, licenses, invoices, and support tickets | The signed-in customer can access their own records for the bound application. Protected software access depends on a qualifying entitlement |
-| Authorized developer staff | Manage sales, licensing, payments, invoices, tickets, email, and application statistics where supported | Organization permissions and the bound application govern staff actions and reporting |
+Use **existing Symfony keys** only. Do not invent panel-only role names. Application-tenant roles are seeded by Identity [`TenantRoleProvisioner`][tenant-roles]. Organization membership and Fonitas-tenant roles stay on their own surfaces.
 
-Fonitas supplies identity, purchasing and payments, licensing, invoices, support tickets, business email, and reporting. The self-hosted dashboard is the branded interface for those services. Customer and developer views use the permissions of the signed-in person. Symfony remains the authority for ownership, entitlement, and business records.
+| Actor | Existing backend key | Local dashboard | Hosted Fonitas |
+| --- | --- | --- | --- |
+| Organization administrator | `ORG_ADMIN` (organization membership) | Installation pairing and branding setup | Domain binding, connection keys, deep admin |
+| Application owner | `APP_OWNER` (seeded Identity role) | Administration overview (charts, lists) | Deep administration |
+| Application admin | `APP_ADMIN` (seeded Identity role) | Administration overview | Deep administration |
+| Support agent | Permission `support.ticket.assign` (optional custom role `APP_SUPPORT` is **not** seeded) | Support ticket inbox | — |
+| End user / buyer | `APP_END_USER` (seeded Identity role) | Purchases, license type and dates, upgrade entry | — |
+
+Fonitas supplies identity, purchasing and payments, licensing, invoices, support tickets, business email, and reporting. The self-hosted dashboard is the branded interface for those services. Gate actions with **permissions** from Identity; use roles only for coarse home selection. Symfony remains the authority for ownership, entitlement, and business records. See [local role workspaces](#local-role-workspaces-static-ui) for the static UI mapping.
 
 ### Target installation and branding
 
@@ -39,8 +44,8 @@ Fonitas supplies identity, purchasing and payments, licensing, invoices, support
 
 ### Target authorization and integration boundaries
 
-- Symfony resolves the bound application from the installation. Each customer operation checks the signed-in identity and ownership of the requested data within that application. Staff operations additionally enforce the relevant organization permission.
-- The hosted Fonitas sign-in flow supplies shared identity. Customer authorization derives from Fonitas purchase or license data. The same account can have different access across applications.
+- Symfony resolves the bound application from the installation. Each customer operation checks the signed-in identity and ownership of the requested data within that application. Staff operations additionally enforce Identity permissions such as `support.ticket.assign` and, where applicable, organization membership (`ORG_ADMIN` / `ORG_MEMBER`) on hosted surfaces.
+- The hosted Fonitas sign-in flow supplies shared identity. Application-tenant access uses seeded roles `APP_OWNER`, `APP_ADMIN`, and `APP_END_USER`. Customer authorization for purchases derives from Fonitas purchase or license data. The same account can have different access across applications.
 - Keep application business state in Fonitas. The self-hosted site stores the installation state, branding, static assets, and the configuration needed to serve its own dashboard.
 - Treat the flows in this section as requirements for future API and frontend work. Verify the producer and consumer before documenting concrete routes, request fields, or compatibility guarantees. The [current API contracts](#api-contracts) describe the existing routes only.
 
@@ -60,15 +65,25 @@ The current releases give software developers and authorized viewers a read-only
 
 ### Local role workspaces (static UI)
 
-The static React client is the local frontend for the bound application on the developer site or subdomain. Fonitas-hosted surfaces stay minimal for day-to-day use: organization domain binding, connection keys, and deep administration remain on the hosted portal. Local role homes own overview charts and lists, support tickets, and customer purchases.
+The static React client is the local frontend for the bound application on the developer site or subdomain. Fonitas-hosted surfaces stay minimal for day-to-day use: organization domain binding, connection keys, and deep administration remain on the hosted portal. Local homes own overview charts and lists, support tickets, and customer purchases.
 
-| Role key | Local UI | Hosted Fonitas |
+Workspace homes follow **existing Identity application-tenant roles** from Symfony `TenantRoleProvisioner`, not panel-invented keys:
+
+| Identity role / permission | Local UI | Notes |
 | --- | --- | --- |
-| `application_admin` | Overview charts, summaries, and lists | Deep administration and domain/key management |
-| `application_support` | Ticket inbox and replies | — |
-| `application_customer` | Purchases, license type and dates, upgrade entry | — |
+| `APP_OWNER`, `APP_ADMIN` | Administration overview | Seeded on every non-reserved tenant. Deep admin stays on hosted Fonitas |
+| `support.ticket.assign` (permission) | Support inbox | Real Support-domain permission. Optional custom role key `APP_SUPPORT` exists in API examples but is **not** seeded |
+| `APP_END_USER` | Customer purchases / license | Seeded; no Identity permissions by default |
 
-Additional roles may arrive later. Register them in [`src/roles.ts`](../src/roles.ts); unknown role keys from the API stay inert until registered. After sign-in the client loads identity from `GET /api/v1/developer-panels/session/me` (`data.display_name`, `data.roles`, `data.permissions`). **This route is the UI contract and is not verified against Symfony yet.** Permissions will gate actions when those APIs ship; roles select the default home. The previous paginated applications list is no longer the signed-in home.
+Related roles that belong elsewhere (do not invent local substitutes):
+
+| Key | Where it lives |
+| --- | --- |
+| `ORG_ADMIN`, `ORG_MEMBER` | Organization membership for the hosted publisher console |
+| `APPLICATION_DEVELOPER`, `FONITAS_CUSTOMER` | Fonitas tenant Identity roles |
+| `SUPER_ADMIN`, `FONITAS_QA`, `SYSTEM_ADMIN`, `FONITAS_SUPPORT` | Fonitas system roles / staff |
+
+Identity `GET /api/v1/auth/me` returns `display_name`, `roles`, and `permissions`. Prefer **permissions** for action gates. The developer-panel bearer session does not expose this identity yet; the client’s `/session/me` loader is an unverified bridge. The previous paginated applications list is no longer the signed-in home.
 
 ### Static trust flow
 
@@ -114,6 +129,16 @@ The installation list includes `public_id`, `origin`, nullable `application_publ
 
 The app summary has `public_id`, `name`, `slug`, and `status`. For a bound installation, page 1 contains the selected application and later pages are empty. The CORS subscriber allows the static pairing and session routes to be called cross-origin without credentials such as cookies. This transport configuration is separate from the server's origin and token checks. [Pair controller][panel-controller] · [Session controller][session-controller] · [CORS subscriber][cors]
 
+Signed-in workspace homes no longer treat `session/applications` as the primary UI. Role and permission data come from Identity:
+
+| Method and path | Input and caller | Success |
+| --- | --- | --- |
+| `GET /api/v1/auth/me` | Identity cookie session | `200`, `data.display_name`, `data.roles`, `data.permissions` |
+
+Verified seeded application-tenant roles: `APP_OWNER`, `APP_ADMIN`, `APP_END_USER`. Verified support gate: permission `support.ticket.assign`. [RBAC guide][identity-rbac] · [TenantRoleProvisioner][tenant-roles]
+
+The static client currently loads identity through [`panel-me.ts`](../src/panel-me.ts) (`/session/me` on the panel API). **That bridge is not verified in Symfony.** Until a verified panel-session identity endpoint exists, treat `GET /api/v1/auth/me` as the role source of truth and label any panel-bearer identity claims as unverified.
+
 ### OEM server API and same-origin views
 
 | Method and path | Input and caller | Success |
@@ -146,7 +171,8 @@ php -l installer/setup.php
 
 | Change | Verify |
 | --- | --- |
-| Static UI or authentication | Build the static output. Smoke-test exact-origin pairing, hosted consent and callback, application list, sign-out confirmation and retry on an HTTPS test site |
+| Static UI or authentication | Build the static output. Smoke-test exact-origin pairing, hosted consent and callback, workspace home selection for `APP_OWNER` / `APP_ADMIN` / `APP_END_USER` and `support.ticket.assign`, sign-out confirmation and retry on an HTTPS test site. Use `npm run dev` preview buttons only for local UI review |
+| Identity role mapping | Confirm keys against [TenantRoleProvisioner][tenant-roles] and [RBAC][identity-rbac]. Do not add panel-only role names |
 | OEM runtime or branding | Build the OEM output. Use a signed test release and a PHP site with trusted viewer identity. Verify an allowed viewer and an unlisted viewer, same-origin requests, and the intended display fields |
 | Installer, state, or release | Check PHP syntax. In a disposable document root and private directory, exercise installation, failed verification, update confirmation and rollback. Confirm that branding and access settings survive the update |
 | Hosted admin changes | Update or run the [hosted Custom Domains browser tests][hosted-tests] in the hosted repository |
@@ -221,11 +247,14 @@ For an OEM rollout, deploy Symfony with the [Organization migration][migration] 
 | Fact | Verify against |
 | --- | --- |
 | Target customer and developer experience | [Product direction for the OEM dashboard](#product-direction-for-the-oem-dashboard) |
+| Application-tenant role keys and default permissions | [TenantRoleProvisioner][tenant-roles], [Identity RBAC][identity-rbac], [roles.ts](../src/roles.ts) |
+| Support ticket assign permission | [Support domain][support-domain], permission `support.ticket.assign` |
 | Routes, DTOs, response envelopes, and allowed browser origins | [Symfony panel controller][panel-controller], [session controller][session-controller], [CORS subscriber][cors] |
 | Installation keys and lifecycle | [DeveloperPanels][panels], [backend Organization reference][backend-organization] |
 | Browser user tokens and validity | [DeveloperPanelSessions][sessions] |
+| Identity session roles and permissions | [GET /api/v1/auth/me][identity-rbac] |
 | OEM activation, binding, and application ownership | [OemDeveloperPanel][oem-service], [DeveloperPanelApplications][panel-applications], [Organization migration][migration] |
-| Actual payloads sent and fields consumed | [hosted settings][hosted-domains], [hosted consent][hosted-consent], [static client](../src/panel-login.ts), [OEM PHP](../installer/setup.php), [OEM browser client](../src/oem.ts) |
+| Actual payloads sent and fields consumed | [hosted settings][hosted-domains], [hosted consent][hosted-consent], [static client](../src/panel-login.ts), [workspace](../src/workspace.tsx), [OEM PHP](../installer/setup.php), [OEM browser client](../src/oem.ts) |
 | Build commands, publishing logic, and current downloads | [package.json](../package.json), [release workflow](../.github/workflows/release.yml), [GitHub Releases][releases] |
 
 When sources disagree, inspect producer and consumer at the relevant Git refs and record which ref or release you verified. If a repository or live environment is unavailable, identify the specific unverified behavior. Do not infer an endpoint or payload from a UI label, staged change, package version, or deployment expectation.
@@ -244,6 +273,9 @@ When sources disagree, inspect producer and consumer at the relevant Git refs an
 [backend-organization]: https://github.com/gemvc/symfony_fonitas/blob/main/docs/domains/organization.md#self-hosted-developer-panels
 [backend-db]: https://github.com/gemvc/symfony_fonitas/blob/main/docs/03-database-operations.md
 [backend-tests]: https://github.com/gemvc/symfony_fonitas/blob/main/tests/Organization/Presentation/Http/Rest/DeveloperPanelControllerTest.php
+[tenant-roles]: https://github.com/gemvc/symfony_fonitas/blob/main/src/Identity/Application/Role/TenantRoleProvisioner.php
+[identity-rbac]: https://github.com/gemvc/symfony_fonitas/blob/main/docs/frontend/Identity/rbac.md
+[support-domain]: https://github.com/gemvc/symfony_fonitas/blob/main/docs/domains/support.md
 [custom-domains]: https://developerpannel.fonitas.com/settings/custom-domains
 [releases]: https://github.com/gemvc/fonitas-self-hosted-panel/releases
 [static-zip]: https://github.com/gemvc/fonitas-self-hosted-panel/releases/latest/download/fonitas-self-hosted-panel.zip

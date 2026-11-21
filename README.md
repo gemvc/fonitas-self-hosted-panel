@@ -1,8 +1,10 @@
 # Fonitas Self-Hosted Developer Panel
 
-Run a software dashboard on your own HTTPS domain. The [product direction](docs/engineering.md#product-direction-for-the-oem-dashboard) defines a branded customer dashboard for one registered application and the developer's Fonitas business tools.
+Run a software dashboard on your own HTTPS domain. The [product direction](docs/engineering.md#product-direction-for-the-oem-dashboard) defines a branded dashboard for one registered application and the developer's Fonitas business tools.
 
-The current releases provide a read-only application view. The static ZIP uses Fonitas sign-in for organization members. The branded PHP dashboard shows one bound application and uses the host's sign-in.
+Local workspace homes follow **existing Identity roles** seeded for application tenants: `APP_OWNER`, `APP_ADMIN`, and `APP_END_USER`. Support uses permission `support.ticket.assign`. See [local role workspaces](docs/engineering.md#local-role-workspaces-static-ui).
+
+Current releases: the static ZIP uses Fonitas sign-in and role-based homes (identity bridge unverified). The branded PHP dashboard shows one bound application and uses the host's sign-in.
 
 ## Install or update
 

@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { messages, type Language } from "./locale";
 import { completePanelSignIn, panelRequest, startPanelSignIn, type PanelSession } from "./panel-login";
 import { setPreviewMe } from "./panel-me";
-import { ROLE_KEYS, type KnownRoleKey } from "./roles";
+import { SUPPORT_ASSIGN_PERMISSION, type SeededAppRole } from "./roles";
 import { Workspace } from "./workspace";
 import "./styles.css";
 
@@ -16,11 +16,17 @@ type Text = typeof messages.en;
 type PairingError = "invalidKey" | "rejectedKey" | "unavailable";
 type SignOutState = { status: "pending" | "failed"; token: string } | { status: "done" };
 
-const rolePreviewLabel: Record<KnownRoleKey, keyof Text> = {
-  application_admin: "roleAdmin",
-  application_support: "roleSupport",
-  application_customer: "roleCustomer",
+type PreviewProfile = {
+  role: SeededAppRole;
+  label: keyof Text;
+  permissions: string[];
 };
+
+const previewProfiles: PreviewProfile[] = [
+  { role: "APP_OWNER", label: "roleOwner", permissions: [SUPPORT_ASSIGN_PERMISSION] },
+  { role: "APP_ADMIN", label: "roleAdmin", permissions: [] },
+  { role: "APP_END_USER", label: "roleCustomer", permissions: [] },
+];
 
 function defaultLanguage(): Language {
   const preferred = localStorage.getItem("fonitas-panel-language") ?? navigator.language.split("-")[0];
@@ -93,13 +99,13 @@ function Panel() {
     }
   }
 
-  function previewRole(role: KnownRoleKey) {
+  function previewProfile(profile: PreviewProfile) {
     setSignInFailed(false);
     setSignOutState(undefined);
     setPreviewMe({
       display_name: "Preview user",
-      roles: [role],
-      permissions: [],
+      roles: [profile.role],
+      permissions: profile.permissions,
     });
     setSession({ access_token: "preview", expires_in: 3_600 });
   }
@@ -138,8 +144,8 @@ function Panel() {
           <section className="preview-roles">
             <p className="muted">{t.previewRoles}</p>
             <div className="actions">
-              {ROLE_KEYS.map(role => (
-                <button key={role} type="button" onClick={() => previewRole(role)}>{t[rolePreviewLabel[role]]}</button>
+              {previewProfiles.map(profile => (
+                <button key={profile.role} type="button" onClick={() => previewProfile(profile)}>{t[profile.label]}</button>
               ))}
             </div>
           </section>
