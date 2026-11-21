@@ -1,6 +1,8 @@
 # Fonitas Self-Hosted Developer Panel
 
-Run a read-only software dashboard on your own HTTPS domain. The static ZIP uses Fonitas sign-in. The branded PHP dashboard uses your site's own sign-in and shows one selected software application.
+Run a software dashboard on your own HTTPS domain. The [product direction](docs/engineering.md#product-direction-for-the-oem-dashboard) defines a branded customer dashboard for one registered application and the developer's Fonitas business tools.
+
+The current releases provide a read-only application view. The static ZIP uses Fonitas sign-in for organization members. The branded PHP dashboard shows one bound application and uses the host's sign-in.
 
 ## Install or update
 

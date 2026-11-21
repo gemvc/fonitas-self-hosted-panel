@@ -14,9 +14,39 @@ This handbook is the repository's reference for architecture, API discovery, dev
 | Change a route, credential, permission, or application scope | Symfony Organization module | [Developer panel controller][panel-controller], [session controller][session-controller], [services](#source-of-truth) |
 | Change a downloadable release asset | This repository, GitHub Actions | [release.yml](../.github/workflows/release.yml), [sign-release.mjs](../installer/sign-release.mjs) |
 
+## Product direction for the OEM dashboard
+
+This section defines the target product. The customer and developer workflows below are planned. See [current purpose and architecture](#purpose-and-architecture) and [operations](#operations) for the software available today.
+
+### Product and roles
+
+Fonitas is a software publishing platform. The developer operates a branded dashboard on an HTTPS origin for one registered software application. A purchase associates the customer's Fonitas identity with that application through the purchase or license entitlement. The buyer is a direct customer of the software and uses Fonitas business services through the developer's brand. The developer uses those same services to run the software business.
+
+| Actor | Purpose | Access boundary |
+| --- | --- | --- |
+| Organization administrator | Install and manage the dashboard for a registered application | The organization owns the application and the installation is registered to its HTTPS origin |
+| Application customer | Sign in with a Fonitas account and see purchases, licenses, invoices, and support tickets | The signed-in customer can access their own records for the bound application. Protected software access depends on a qualifying entitlement |
+| Authorized developer staff | Manage sales, licensing, payments, invoices, tickets, email, and application statistics where supported | Organization permissions and the bound application govern staff actions and reporting |
+
+Fonitas supplies identity, purchasing and payments, licensing, invoices, support tickets, business email, and reporting. The self-hosted dashboard is the branded interface for those services. Customer and developer views use the permissions of the signed-in person. Symfony remains the authority for ownership, entitlement, and business records.
+
+### Target installation and branding
+
+1. The organization administrator opens `/setup.php` on the registered HTTPS origin and selects **Sign in with Fonitas**. The Fonitas sign-in page handles account credentials and any MFA. After authentication, a short-lived, one-time authorization code returns to the registered origin. The installer validates callback state and exchanges the code server-side.
+2. Symfony verifies that the actor can manage the organization and that the origin is bound to its registered application. The installer loads organization and application details from that binding. The installer flow needs a backend authorization step that works before the installation is connected. The existing organization-member sign-in flow requires an already connected installation. [Current session service][sessions]
+3. The organization display name is prefilled. The editable form has the display name, a PNG logo upload, and a favicon upload. Store uploaded branding assets on the self-hosted server and serve them on the dashboard origin. Validate file content and size server-side. Keep branding across bundle updates and rollback.
+4. Activation uses the authorized installer session. The target flow removes manual connection-key entry, a separate installer password, a local user list, and reliance on `REMOTE_USER`. Installation credentials and server state stay in PHP. Brand assets are local configuration that survives signed dashboard bundle updates.
+
+### Target authorization and integration boundaries
+
+- Symfony resolves the bound application from the installation. Each customer operation checks the signed-in identity and ownership of the requested data within that application. Staff operations additionally enforce the relevant organization permission.
+- The hosted Fonitas sign-in flow supplies shared identity. Customer authorization derives from Fonitas purchase or license data. The same account can have different access across applications.
+- Keep application business state in Fonitas. The self-hosted site stores the installation state, branding, static assets, and the configuration needed to serve its own dashboard.
+- Treat the flows in this section as requirements for future API and frontend work. Verify the producer and consumer before documenting concrete routes, request fields, or compatibility guarantees. The [current API contracts](#api-contracts) describe the existing routes only.
+
 ## Purpose and architecture
 
-The dashboard gives software developers and authorized viewers a read-only view of application status on a custom domain. It has two distributions that share CSS and release automation. The hosted developer portal owns organization administration, domain requests, and application changes. Symfony owns application data, installation binding, and Fonitas authorization.
+The current releases give software developers and authorized viewers a read-only view of application status on a custom domain. It has two distributions that share CSS and release automation. The hosted developer portal owns organization administration, domain requests, and application changes. Symfony owns application data, installation binding, and Fonitas authorization.
 
 | | Static ZIP | Branded PHP dashboard (OEM) |
 | --- | --- | --- |
@@ -26,7 +56,7 @@ The dashboard gives software developers and authorized viewers a read-only view 
 | Application scope | An unbound installation lists applications in its organization. A bound installation lists only its selected application | One application selected in Custom Domains and enforced by Symfony |
 | Operator and viewer | Organizations manage domains and keys in the hosted portal. Active organization members can use static sign-in | An administrator uses the hosted portal for domain binding and a separate local management password for `/setup.php`. Viewers use the site's own authentication |
 
-`SoftwareApplication` represents the software shown in the dashboard. The binding uses its public UUID. Application name and status come from Symfony. OEM brand name, logo, accent, language, support URL, and permitted viewers are local configuration. The dashboard has no application editing, release publishing, or customer licensing API.
+`SoftwareApplication` represents the software shown in the dashboard. The binding uses its public UUID. Application name and status come from Symfony. OEM brand name, logo, accent, language, support URL, and permitted viewers are local configuration. Current dashboard routes provide an application summary. Customer licensing, billing, and support views are part of the [target product direction](#product-direction-for-the-oem-dashboard).
 
 ### Static trust flow
 
@@ -162,6 +192,7 @@ For an OEM rollout, deploy Symfony with the [Organization migration][migration] 
 
 | Fact | Verify against |
 | --- | --- |
+| Target customer and developer experience | [Product direction for the OEM dashboard](#product-direction-for-the-oem-dashboard) |
 | Routes, DTOs, response envelopes, and allowed browser origins | [Symfony panel controller][panel-controller], [session controller][session-controller], [CORS subscriber][cors] |
 | Installation keys and lifecycle | [DeveloperPanels][panels], [backend Organization reference][backend-organization] |
 | Browser user tokens and validity | [DeveloperPanelSessions][sessions] |
