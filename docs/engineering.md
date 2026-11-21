@@ -204,6 +204,17 @@ php -l installer/setup.php
 
 ## Operations
 
+### Temporary automatic deployment to Infrasible
+
+[Deploy Infrasible dashboard test](../.github/workflows/deploy-infrasible-test.yml) uploads the customer PHP readiness service via FTPS after a push to `main`. It uses a separate GitHub environment and upload state from the Infrasible website. It is disabled until the repository variable `INFRASIBLE_TEST_DEPLOY_ENABLED` is `true`.
+
+1. Create a dedicated FTPS account whose home is the dashboard test application directory. Use a fresh directory outside other public web roots and keep the previous dashboard document root for rollback. The workflow uploads relative to the account's home.
+2. On the host, put the private `.env` in that application directory using the [customer configuration](#customer-only-php-backend). Configure the dashboard virtual host's document root as the directory's `public/` subdirectory. The checked-in Apache rewrite sends `/api/health` to `index.php`. Use PHP 8.2 or later with cURL and enable Apache-compatible rewrite support for that directory.
+3. In the repository, create the `infrasible-dashboard-test` environment and add `DASHBOARD_FTPS_SERVER`, `DASHBOARD_FTPS_USERNAME`, and `DASHBOARD_FTPS_PASSWORD` as environment secrets. Use the provider's hostname that matches the FTPS certificate. Set the repository variable to `true`. Open **Actions → Deploy Infrasible dashboard test** and run it from `main` with **dry_run** before the first upload.
+4. Run the workflow without **dry_run**. It verifies `https://dashboard.infrasible.com/api/health`. This deployment currently serves only the readiness endpoint. Switching the document root makes the previous dashboard page unavailable on that domain until you restore its root or deploy the customer frontend.
+
+The upload contains the three PHP files and the public rewrite configuration. Keep `.env` on the host. To stop automatic deployments after the test, set `INFRASIBLE_TEST_DEPLOY_ENABLED` to `false` or remove it. To revert the site, separately restore its previous document root.
+
 ### Install the static ZIP
 
 1. Download and extract the [static ZIP][static-zip]. Put `index.html` and `assets/` directly at the root of the HTTPS domain.
