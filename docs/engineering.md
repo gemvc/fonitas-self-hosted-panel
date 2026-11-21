@@ -7,6 +7,7 @@ This handbook is the repository's reference for architecture, API discovery, dev
 | Task | Owning component | Entry point |
 | --- | --- | --- |
 | Change the static ZIP dashboard, pairing, or Fonitas sign-in | This repository, React and TypeScript | [index.html](../index.html), [main.tsx](../src/main.tsx), [panel-login.ts](../src/panel-login.ts) |
+| Change the customer PHP API or installation validation | This repository, server-side PHP | [customer/public/index.php](../customer/public/index.php), [customer/src](../customer/src/) |
 | Change OEM branding or the application summary | This repository, HTML and TypeScript | [oem.html](../oem.html), [oem.ts](../src/oem.ts), shared [styles.css](../src/styles.css) |
 | Change OEM setup, configuration, access, or updates | This repository, server-side PHP | [installer/setup.php](../installer/setup.php), especially `panelAction`, `panelRuntime`, `panelLatestRelease`, and `panelStageRelease` |
 | Change the organization admin's domain workflow | Hosted developer portal | [Custom Domains page][hosted-domains] |
@@ -43,6 +44,14 @@ Fonitas supplies identity, purchasing and payments, licensing, invoices, support
 - The hosted Fonitas sign-in flow supplies shared identity. Customer authorization derives from Fonitas purchase or license data. The same account can have different access across applications.
 - Keep application business state in Fonitas. The self-hosted site stores the installation state, branding, static assets, and the configuration needed to serve its own dashboard.
 - Treat the flows in this section as requirements for future API and frontend work. Verify the producer and consumer before documenting concrete routes, request fields, or compatibility guarantees. The [current API contracts](#api-contracts) describe the existing routes only.
+
+### Customer-only PHP backend
+
+The first customer release covers signed-in buyers, their purchases, and their licenses for one application. Administration, support, and reporting are later work. The customer backend lives in [customer/](../customer/) and uses Symfony for installation and customer authorization.
+
+Use the source checkout for this backend. The existing installer and signed OEM ZIP package the legacy dashboard. Set the virtual host's document root to `customer/public` and route `/api/health` to its `index.php`. Copy `customer/.env.example` to `customer/.env` outside that document root. Restrict the file to the PHP worker, with mode `0600`. Set `APP_ID` to the application's public UUID, `PANEL_ORIGIN` to the exact registered HTTPS origin, and `DOMAIN_TOKEN` to the server-side OEM installation credential obtained through activation. The one-time connection key is redeemed during activation and is a separate value. An existing installation keeps its credential in the private state file described under [Operations](#operations). Keep the token out of URLs, browser code, and logs.
+
+`GET /api/health` checks configuration and verifies the application binding through the existing Symfony OEM application route. It returns `200` with `{"status":"ready"}` when the binding is usable and `503` otherwise. It returns no application or buyer details. There are currently no customer data routes in this PHP entry point. The existing Symfony purchase list authenticates the buyer, so a future customer endpoint must check both that identity and the installation's application before returning purchases or licenses. Publish the customer sign-in and data contract before wiring the frontend. [OEM service][oem-service] · [Fonitas buyer purchases API](https://github.com/gemvc/symfony_fonitas/blob/main/src/License/Presentation/Http/Rest/BuyerPurchasesController.php)
 
 ## Purpose and architecture
 
