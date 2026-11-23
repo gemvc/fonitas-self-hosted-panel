@@ -7,7 +7,7 @@ This handbook is the repository's reference for architecture, API discovery, dev
 | Task | Owning component | Entry point |
 | --- | --- | --- |
 | Change the static ZIP dashboard, pairing, or Fonitas sign-in | This repository, React and TypeScript | [index.html](../index.html), [main.tsx](../src/main.tsx), [panel-login.ts](../src/panel-login.ts) |
-| Change local workspace homes or Identity role mapping | This repository, React and TypeScript | [roles.ts](../src/roles.ts), [workspace.tsx](../src/workspace.tsx), [panel-me.ts](../src/panel-me.ts), [pages/](../src/pages/) |
+| Change the customer workspace or Identity role gate | This repository, React and TypeScript | [roles.ts](../src/roles.ts), [workspace.tsx](../src/workspace.tsx), [panel-me.ts](../src/panel-me.ts), [customer-home.tsx](../src/pages/customer-home.tsx) |
 | Change the customer PHP API or installation validation | This repository, server-side PHP | [customer/public/index.php](../customer/public/index.php), [customer/src](../customer/src/) |
 | Change allowed installation origins (HTTPS domain / localhost policy) | This repository, and Symfony origin validation | [origin.ts](../src/origin.ts), [installer `panelOrigin`](../installer/setup.php), Symfony [`isCustomOrigin`][panels] |
 | Change OEM branding or the application summary | This repository, HTML and TypeScript | [oem.html](../oem.html), [oem.ts](../src/oem.ts), shared [styles.css](../src/styles.css) |
@@ -45,7 +45,15 @@ Target integration uses **two complementary identifiers**. Keep both; do not rep
 | **Domain / connection key** | Binds the exact installation origin (`Origin`) to an organization (and for OEM, one application). Pairing and OEM activation redeem the one-time connection key (`fpk_…`) for that origin | Live for panel pair / OEM activate |
 | **Application API key** | Lets frontend and backend detect **which software** the installation serves, independent of UI chrome | Planned. Document the Symfony producer and this consumer before locking request fields |
 
-During development, origin detection must accept a **registered domain URL** and **localhost** so engineers can run the dashboard without a public HTTPS host. Before production lock-down, **reject localhost** in the static client ([`ALLOW_LOCALHOST_ORIGINS`](../src/origin.ts)), the PHP installer ([`PANEL_DEV_ALLOW_LOCALHOST`](../installer/setup.php)), and Symfony [`isCustomOrigin`][panels]. Today Symfony still requires `https://` public hostnames only; extending it for development localhost is a required companion change and is **not verified** in this repository.
+During development, origin detection accepts a **registered domain URL** and **localhost** so engineers can run the dashboard without a public HTTPS host. Before production lock-down, **reject localhost** by setting these flags to `false`:
+
+| Layer | Flag |
+| --- | --- |
+| Static client | [`ALLOW_LOCALHOST_ORIGINS`](../src/origin.ts) |
+| PHP installer / OEM | [`PANEL_DEV_ALLOW_LOCALHOST`](../installer/setup.php) |
+| Symfony | [`DeveloperPanels::ALLOW_LOCALHOST_ORIGINS`][panels] |
+
+Symfony now accepts `http://localhost`, `http://127.0.0.1`, and `http://[::1]` (optional port) while that constant is `true`. Verify the backend change is deployed before relying on localhost pairing against a remote API.
 
 ### First milestone: customer registration from the app site
 
@@ -122,28 +130,30 @@ The current releases give software developers and authorized viewers a read-only
 
 `SoftwareApplication` represents the software shown in the dashboard. The binding uses its public UUID. Application name and status come from Symfony. OEM brand name, logo, favicon, accent, language, support URL, and permitted viewers are local configuration. Current dashboard routes provide an application summary. Customer licensing, billing, and support views are part of the [target product direction](#product-direction-for-the-oem-dashboard).
 
-### Local role workspaces (static UI)
+### Local customer workspace (static UI)
 
-The static React client is the local frontend for the bound application. Product direction is **customer-first** (`APP_END_USER`). Other seeded Identity roles remain mapped in [`roles.ts`](../src/roles.ts) for development previews and possible later homes; they are not the primary shipped audience.
+The static React client ships a **customer-only** home for `APP_END_USER` ([`roles.ts`](../src/roles.ts), [`workspace.tsx`](../src/workspace.tsx), [`pages/customer-home.tsx`](../src/pages/customer-home.tsx)). Accounts without that role see a no-access message. Admin and support homes are out of scope for this package; they stay on hosted Fonitas.
 
-| Identity role / permission | Local UI | Notes |
-| --- | --- | --- |
-| `APP_END_USER` | Customer purchases / license | Primary local dashboard audience |
-| `APP_OWNER`, `APP_ADMIN` | Administration overview (preview / later) | Deep admin stays on hosted Fonitas |
-| `support.ticket.assign` | Support inbox (preview / later) | Real Support permission; optional custom `APP_SUPPORT` is **not** seeded |
-
-Related keys that belong elsewhere: `ORG_ADMIN` / `ORG_MEMBER` (hosted publisher), `APPLICATION_DEVELOPER` / `FONITAS_CUSTOMER` (Fonitas tenant), staff system roles.
-
-Identity `GET /api/v1/auth/me` returns `display_name`, `roles`, and `permissions`. Prefer **permissions** for action gates. The developer-panel bearer session does not expose this identity yet; the client’s `/session/me` loader is an unverified bridge.
+Identity `GET /api/v1/auth/me` returns `display_name`, `roles`, and `permissions`. Prefer **permissions** for action gates when those APIs ship. The developer-panel bearer session does not expose this identity yet; the client’s `/session/me` loader is an unverified bridge.
 
 ### Origin policy (domain and localhost)
 
 | Phase | Allowed installation origins |
 | --- | --- |
 | **Development** (current) | `https://` registered domain URLs, and `http://localhost` / `127.0.0.1` / `[::1]` (with optional port) |
-| **Production lock-down** | `https://` registered domain URLs only. Set `ALLOW_LOCALHOST_ORIGINS` and `PANEL_DEV_ALLOW_LOCALHOST` to `false`, and keep Symfony `isCustomOrigin` rejecting loopback |
+| **Production lock-down** | `https://` registered domain URLs only. Set the three `ALLOW_*_LOCALHOST*` / `ALLOW_LOCALHOST_ORIGINS` flags to `false` |
 
-The static UI uses [`isAllowedPanelOrigin`](../src/origin.ts) before pairing and sign-in. OEM PHP uses [`panelOrigin`](../installer/setup.php). Backend registration and pair/activate still call Symfony `isCustomOrigin`, which currently allows only `https://` public hostnames without ports — **localhost pairing against production API will fail until that rule is extended for development**.
+The static UI uses [`isAllowedPanelOrigin`](../src/origin.ts) before pairing and sign-in. OEM PHP uses [`panelOrigin`](../installer/setup.php). Symfony uses [`DeveloperPanels::isCustomOrigin`][panels].
+
+### Next steps
+
+| Order | Work | Owner |
+| --- | --- | --- |
+| 1 | Deploy / verify Symfony localhost origin acceptance with the self-hosted client | `symfony_fonitas` + this repo |
+| 2 | Verified buyer identity on the panel session (`APP_END_USER` from a real contract, not only `/session/me` bridge) | Symfony + static client |
+| 3 | Customer purchase / license / upgrade API consumers against verified License routes | This repo + Symfony License |
+| 4 | Application API key contract for software detection (keep domain connection key) | Symfony first, then this repo |
+| 5 | Production lock-down: disable localhost flags in all three layers | This repo + Symfony |
 
 ### Static trust flow
 
@@ -231,9 +241,9 @@ php -l installer/setup.php
 
 | Change | Verify |
 | --- | --- |
-| Static UI or authentication | Build the static output. Smoke-test pairing on an HTTPS domain and, while development localhost is enabled, on `http://localhost`. Confirm production lock-down rejects localhost. Prefer customer (`APP_END_USER`) home checks. Use `npm run dev` preview buttons only for local UI review |
-| Identity role mapping | Confirm keys against [TenantRoleProvisioner][tenant-roles] and [RBAC][identity-rbac]. Do not add panel-only role names |
-| Origin / API-key detection | Keep domain connection-key flow. Document any new application API-key contract against Symfony before coding consumers. When enabling localhost in Symfony, cover allowed loopback and rejected non-local HTTP |
+| Static UI or authentication | Build the static output. Smoke-test pairing on an HTTPS domain and, while development localhost is enabled, on `http://localhost`. Confirm only `APP_END_USER` opens the customer home. Use `npm run dev` preview for local UI review |
+| Identity role mapping | Confirm `APP_END_USER` against [TenantRoleProvisioner][tenant-roles] and [RBAC][identity-rbac]. Do not add panel-only role names |
+| Origin / API-key detection | Keep domain connection-key flow. Document any new application API-key contract against Symfony before coding consumers. Cover allowed loopback and rejected non-local HTTP in Symfony origin tests |
 | OEM runtime or branding | Build the OEM output. Use a signed test release and a PHP site with trusted viewer identity. Verify an allowed viewer and an unlisted viewer, same-origin requests, and the intended display fields |
 | Installer, state, or release | Check PHP syntax. In a disposable document root and private directory, exercise installation, failed verification, update confirmation and rollback. Confirm that branding and access settings survive the update |
 | Hosted admin changes | Update or run the [hosted Custom Domains browser tests][hosted-tests] in the hosted repository |

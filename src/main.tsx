@@ -4,7 +4,7 @@ import { messages, type Language } from "./locale";
 import { completePanelSignIn, panelRequest, startPanelSignIn, type PanelSession } from "./panel-login";
 import { isAllowedPanelOrigin } from "./origin";
 import { setPreviewMe } from "./panel-me";
-import { SUPPORT_ASSIGN_PERMISSION, type SeededAppRole } from "./roles";
+import { CUSTOMER_ROLE } from "./roles";
 import { Workspace } from "./workspace";
 import "./styles.css";
 
@@ -16,18 +16,6 @@ void pendingSession?.catch(() => {});
 type Text = typeof messages.en;
 type PairingError = "invalidKey" | "rejectedKey" | "unavailable";
 type SignOutState = { status: "pending" | "failed"; token: string } | { status: "done" };
-
-type PreviewProfile = {
-  role: SeededAppRole;
-  label: keyof Text;
-  permissions: string[];
-};
-
-const previewProfiles: PreviewProfile[] = [
-  { role: "APP_OWNER", label: "roleOwner", permissions: [SUPPORT_ASSIGN_PERMISSION] },
-  { role: "APP_ADMIN", label: "roleAdmin", permissions: [] },
-  { role: "APP_END_USER", label: "roleCustomer", permissions: [] },
-];
 
 function defaultLanguage(): Language {
   const preferred = localStorage.getItem("fonitas-panel-language") ?? navigator.language.split("-")[0];
@@ -100,13 +88,13 @@ function Panel() {
     }
   }
 
-  function previewProfile(profile: PreviewProfile) {
+  function previewCustomer() {
     setSignInFailed(false);
     setSignOutState(undefined);
     setPreviewMe({
-      display_name: "Preview user",
-      roles: [profile.role],
-      permissions: profile.permissions,
+      display_name: "Preview customer",
+      roles: [CUSTOMER_ROLE],
+      permissions: [],
     });
     setSession({ access_token: "preview", expires_in: 3_600 });
   }
@@ -145,9 +133,7 @@ function Panel() {
           <section className="preview-roles">
             <p className="muted">{t.previewRoles}</p>
             <div className="actions">
-              {previewProfiles.map(profile => (
-                <button key={profile.role} type="button" onClick={() => previewProfile(profile)}>{t[profile.label]}</button>
-              ))}
+              <button type="button" onClick={previewCustomer}>{t.roleCustomer}</button>
             </div>
           </section>
         )}

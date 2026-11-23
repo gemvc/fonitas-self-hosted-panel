@@ -1,8 +1,8 @@
 # Fonitas Self-Hosted Developer Panel
 
-Run a software dashboard on your own domain or, during development, on localhost. The [product direction](docs/engineering.md#product-direction-for-the-oem-dashboard) is a **customer-first** branded panel for one registered application (`APP_END_USER`), with purchases and licenses for signed-in customers.
+Run a **customer-only** dashboard on your own domain or, during development, on localhost. The [product direction](docs/engineering.md#product-direction-for-the-oem-dashboard) is a branded panel for one registered application’s buyers (`APP_END_USER`).
 
-Installation binding keeps the **domain connection key**. An **application API key** will identify the software once the Symfony contract is verified. Development allows HTTPS domains and localhost; production lock-down rejects localhost. See [installation detection](docs/engineering.md#installation-detection-api-key-and-domain) and [origin policy](docs/engineering.md#origin-policy-domain-and-localhost).
+Installation binding keeps the **domain connection key**. An **application API key** will identify the software once the Symfony contract is verified. Development allows HTTPS domains and localhost; production lock-down rejects localhost. See [installation detection](docs/engineering.md#installation-detection-api-key-and-domain), [origin policy](docs/engineering.md#origin-policy-domain-and-localhost), and [next steps](docs/engineering.md#next-steps).
 
 ## Install or update
 
