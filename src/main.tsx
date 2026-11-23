@@ -1,6 +1,7 @@
 import { StrictMode, useCallback, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { createLocalCustomerSession, isLocalCustomerToken } from "./customer-session";
+import { IdentityApiError, registerIdentityUser } from "./identity-api";
 import { messages, type Language } from "./locale";
 import { clearLocalMe, rememberLocalMe } from "./panel-me";
 import { panelRequest, type PanelSession } from "./panel-login";
@@ -15,7 +16,13 @@ const setupPairing = new URLSearchParams(window.location.search).get("setup") ==
 type Text = typeof messages.en;
 type AuthMode = "sign-in" | "register";
 type PairingError = "invalidKey" | "rejectedKey" | "unavailable";
-type AuthError = "authFailed" | "passwordMismatch" | "unavailable";
+type AuthError =
+  | "authFailed"
+  | "passwordMismatch"
+  | "unavailable"
+  | "emailTaken"
+  | "registerFailed"
+  | "registerInvalid";
 
 function defaultLanguage(): Language {
   const preferred = localStorage.getItem("fonitas-panel-language") ?? navigator.language.split("-")[0];
@@ -47,7 +54,7 @@ function Panel() {
     return () => window.clearTimeout(timeout);
   }, [session, endSession]);
 
-  function submitAuth(event: FormEvent<HTMLFormElement>) {
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
     const form = new FormData(event.currentTarget);
@@ -69,14 +76,27 @@ function Panel() {
     setBusy(true);
     setSignedOut(false);
     try {
-      // Same-origin OEM UI only for now. Fonitas credential verification via customer PHP is planned.
       const displayName = authMode === "register" && name ? name : email.split("@")[0] || email;
+      let verified = false;
+      if (authMode === "register") {
+        // Creates the Identity user and dispatches the verification email on Fonitas.
+        const registered = await registerIdentityUser({ displayName, email, password });
+        verified = registered.email_verified;
+      }
       const next = createLocalCustomerSession(displayName, email);
+      if (verified) next.me.email_verified = true;
       rememberLocalMe(next.me);
       setSession({ access_token: next.access_token, expires_in: next.expires_in });
       event.currentTarget.reset();
-    } catch {
-      setAuthError("unavailable");
+    } catch (cause) {
+      if (cause instanceof IdentityApiError) {
+        if (cause.message === "email_taken") setAuthError("emailTaken");
+        else if (cause.message === "validation") setAuthError("registerInvalid");
+        else if (cause.message === "register_failed") setAuthError("registerFailed");
+        else setAuthError("unavailable");
+      } else {
+        setAuthError("unavailable");
+      }
     } finally {
       setBusy(false);
     }
@@ -125,7 +145,7 @@ function Panel() {
                 className={authMode === "register" ? "primary" : undefined}
                 onClick={() => { setAuthMode("register"); setAuthError(null); }}>{t.register}</button>
             </div>
-            <form onSubmit={submitAuth}>
+            <form onSubmit={event => void submitAuth(event)}>
               {authMode === "register" && (
                 <label>{t.name}
                   <input name="name" type="text" autoComplete="name" required disabled={busy} />

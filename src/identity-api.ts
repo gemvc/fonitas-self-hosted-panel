@@ -1,5 +1,5 @@
 /**
- * Identity API for public email verification (OEM customer profile).
+ * Identity API for public registration and email verification (OEM customer profile).
  * In DEV, use the Vite proxy (`/fonitas-api`) so localhost does not depend on CORS.
  */
 export const identityApi = (
@@ -26,11 +26,61 @@ function identityRequest(path: string, init?: RequestInit): Promise<Response> {
 export class IdentityApiError extends Error {
   readonly status?: number;
 
-  constructor(code: "rate_limited" | "unavailable" | "validation", status?: number) {
+  constructor(
+    code: "rate_limited" | "unavailable" | "validation" | "email_taken" | "register_failed",
+    status?: number,
+  ) {
     super(code);
     this.name = "IdentityApiError";
     this.status = status;
   }
+}
+
+export type IdentityRegisterResult = {
+  display_name: string;
+  email: string;
+  email_verified: boolean;
+};
+
+/** Creates the Fonitas Identity user and triggers the verification email. */
+export async function registerIdentityUser(input: {
+  displayName: string;
+  email: string;
+  password: string;
+}): Promise<IdentityRegisterResult> {
+  let response: Response;
+  try {
+    response = await identityRequest("/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenant_slug: tenantSlug(),
+        display_name: input.displayName,
+        email: input.email,
+        password: input.password,
+      }),
+    });
+  } catch {
+    throw new IdentityApiError("unavailable");
+  }
+
+  if (response.status === 201) {
+    const body = await response.json() as {
+      data?: {
+        display_name?: string;
+        primary_email?: { email?: string; is_verified?: boolean };
+      };
+    };
+    return {
+      display_name: body.data?.display_name || input.displayName,
+      email: body.data?.primary_email?.email || input.email,
+      email_verified: Boolean(body.data?.primary_email?.is_verified),
+    };
+  }
+  if (response.status === 409) throw new IdentityApiError("email_taken", 409);
+  if (response.status === 422) throw new IdentityApiError("validation", 422);
+  if (response.status === 429) throw new IdentityApiError("rate_limited", 429);
+  throw new IdentityApiError("register_failed", response.status);
 }
 
 /** Always returns 204 for accepted shape (anti-enumeration). */
