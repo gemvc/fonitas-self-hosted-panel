@@ -1,4 +1,7 @@
+import { useState, type FormEvent } from "react";
+import { resendEmailVerification, verificationCodePattern, verifyEmailByCode } from "../../identity-api";
 import type { messages } from "../../locale";
+import { updateLocalMe, type PanelMe } from "../../panel-me";
 import { ActionRow, ComingSoonNote, EmptyPanel, SectionFrame } from "./section-frame";
 
 type Text = typeof messages.en;
@@ -124,23 +127,128 @@ export function SupportSection({ t }: { t: Text }) {
   );
 }
 
-export function ProfileSection({ t, displayName, onSignOut }: {
+export function ProfileSection({
+  t,
+  me,
+  onMeChange,
+}: {
   t: Text;
-  displayName: string;
-  onSignOut: () => void;
+  me: PanelMe;
+  onMeChange: (me: PanelMe) => void;
 }) {
+  const email = me.email ?? "";
+  const [verified, setVerified] = useState(Boolean(me.email_verified));
+  const [codeSent, setCodeSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<"verifyFailed" | "verifyInvalid" | "rateLimited" | "unavailable" | null>(null);
+
+  async function sendCode() {
+    if (!email || busy || verified) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await resendEmailVerification(email);
+      setCodeSent(true);
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message === "rate_limited" ? "rateLimited" : "unavailable");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!email || busy || verified) return;
+    const code = String(new FormData(event.currentTarget).get("code") ?? "").trim();
+    if (!verificationCodePattern.test(code)) {
+      setError("verifyInvalid");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const ok = await verifyEmailByCode(email, code);
+      if (!ok) {
+        setError("verifyFailed");
+        return;
+      }
+      setVerified(true);
+      const next = updateLocalMe({ email_verified: true }) ?? { ...me, email_verified: true };
+      onMeChange(next);
+      event.currentTarget.reset();
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message === "rate_limited" ? "rateLimited" : "unavailable");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <SectionFrame title={t.navProfile} intro={t.profileIntro}>
       <section className="panel-section">
         <h2>{t.profileAccountHeading}</h2>
         <dl className="detail-list profile-list">
-          <div><dt>{t.name}</dt><dd>{displayName}</dd></div>
-          <div><dt>{t.email}</dt><dd>—</dd></div>
+          <div><dt>{t.name}</dt><dd>{me.display_name}</dd></div>
+          <div>
+            <dt>{t.email}</dt>
+            <dd className="email-status">
+              <span>{email || "—"}</span>
+              {verified ? (
+                <span className="verified-badge" role="status">
+                  <span className="verified-check" aria-hidden="true">✓</span>
+                  {t.emailVerified}
+                </span>
+              ) : (
+                <span className="muted">{t.emailUnverified}</span>
+              )}
+            </dd>
+          </div>
           <div><dt>{t.profileLanguage}</dt><dd>—</dd></div>
         </dl>
         <ActionRow>
           <button type="button" className="primary" disabled>{t.saveProfile}</button>
         </ActionRow>
+      </section>
+
+      <section className="panel-section">
+        <h2>{t.verifyEmailHeading}</h2>
+        {verified ? (
+          <p className="verified-line" role="status">
+            <span className="verified-check" aria-hidden="true">✓</span>
+            {t.emailVerifiedMessage}
+          </p>
+        ) : (
+          <>
+            <p className="muted">{t.verifyEmailIntro}</p>
+            <ActionRow>
+              <button type="button" className="primary" onClick={() => void sendCode()} disabled={!email || busy}>
+                {busy && !codeSent ? t.loading : t.verifyEmail}
+              </button>
+            </ActionRow>
+            {codeSent && (
+              <form className="profile-form" onSubmit={event => void submitCode(event)}>
+                <label>{t.verificationCode}
+                  <input
+                    name="code"
+                    type="text"
+                    inputMode="text"
+                    autoComplete="one-time-code"
+                    spellCheck={false}
+                    maxLength={8}
+                    minLength={8}
+                    pattern="(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9]{8}"
+                    dir="ltr"
+                    required
+                    disabled={busy}
+                  />
+                </label>
+                <p className="muted">{t.verificationCodeHint}</p>
+                <button type="submit" className="primary" disabled={busy}>{t.submitVerificationCode}</button>
+              </form>
+            )}
+            {error && <p role="alert" className="error">{t[error]}</p>}
+          </>
+        )}
       </section>
 
       <section className="panel-section">
@@ -173,14 +281,6 @@ export function ProfileSection({ t, displayName, onSignOut }: {
         <h2>{t.emailHeading}</h2>
         <p className="muted">{t.emailIntro}</p>
         <EmptyPanel message={t.emailEmpty} />
-      </section>
-
-      <section className="panel-section">
-        <h2>{t.sessionHeading}</h2>
-        <p className="muted">{t.sessionIntro}</p>
-        <ActionRow>
-          <button type="button" onClick={onSignOut}>{t.signOut}</button>
-        </ActionRow>
       </section>
 
       <ComingSoonNote t={t} />

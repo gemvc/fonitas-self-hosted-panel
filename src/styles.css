@@ -166,6 +166,31 @@ label { display: grid; gap: 0.35rem; }
   margin-block-start: 0.75rem;
 }
 .profile-form { display: grid; gap: 0.8rem; }
+.email-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+.verified-badge, .verified-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #0f7a3a;
+  font-weight: 600;
+}
+.verified-check {
+  display: inline-grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  background: #0f7a3a;
+  color: #fff;
+  font-size: 0.75rem;
+  line-height: 1;
+}
 
 #dashboard #application {
   border-inline-start: 4px solid var(--dashboard-accent, #2858b8);

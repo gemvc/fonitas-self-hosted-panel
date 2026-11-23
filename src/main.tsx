@@ -71,7 +71,7 @@ function Panel() {
     try {
       // Same-origin OEM UI only for now. Fonitas credential verification via customer PHP is planned.
       const displayName = authMode === "register" && name ? name : email.split("@")[0] || email;
-      const next = createLocalCustomerSession(displayName);
+      const next = createLocalCustomerSession(displayName, email);
       rememberLocalMe(next.me);
       setSession({ access_token: next.access_token, expires_in: next.expires_in });
       event.currentTarget.reset();

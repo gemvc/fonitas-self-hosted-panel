@@ -24,7 +24,7 @@ The customer dashboard is installed on a subdomain (or site) of software a devel
 
 ### Product and roles
 
-Fonitas is a software publishing platform. The developer publishes an application on Fonitas and installs this dashboard on their own subdomain for that application. **The audience is the application customer** (`APP_END_USER`). The shell uses a top navbar (language plus a profile avatar menu with Profile, Send ticket, and Sign out) and a sidebar: overview, buy now, licenses (with devices), subscriptions, billing (purchases and payment history), support tickets, and profile. Profile holds account details, change password, payment methods, email, and sign out.
+Fonitas is a software publishing platform. The developer publishes an application on Fonitas and installs this dashboard on their own subdomain for that application. **The audience is the application customer** (`APP_END_USER`). The shell uses a top navbar (language plus a profile avatar menu with Profile, Send ticket, and Sign out) and a sidebar: overview, buy now, licenses (with devices), subscriptions, billing (purchases and payment history), support tickets, and profile. Profile holds account details, email verification (8-character Fonitas code), change password, payment methods, and mailbox email.
 
 Use **existing Symfony keys** only. Do not invent panel-only role names. Application-tenant roles are seeded by Identity [`TenantRoleProvisioner`][tenant-roles].
 

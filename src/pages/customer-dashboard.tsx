@@ -1,5 +1,6 @@
 import { CUSTOMER_SECTIONS, type CustomerSection } from "../customer-nav";
 import type { messages } from "../locale";
+import type { PanelMe } from "../panel-me";
 import {
   BillingSection,
   BuySection,
@@ -25,16 +26,16 @@ const navLabel: Record<CustomerSection, keyof Text> = {
 /** OEM customer dashboard for one published application on the developer’s subdomain. */
 export function CustomerDashboard({
   t,
-  displayName,
+  me,
+  onMeChange,
   section,
   onSectionChange,
-  onSignOut,
 }: {
   t: Text;
-  displayName: string;
+  me: PanelMe;
+  onMeChange: (me: PanelMe) => void;
   section: CustomerSection;
   onSectionChange: (section: CustomerSection) => void;
-  onSignOut: () => void;
 }) {
   return (
     <div className="customer-shell">
@@ -55,13 +56,13 @@ export function CustomerDashboard({
       </aside>
 
       <div className="customer-main">
-        {section === "overview" && <OverviewSection t={t} displayName={displayName} go={onSectionChange} />}
+        {section === "overview" && <OverviewSection t={t} displayName={me.display_name} go={onSectionChange} />}
         {section === "buy" && <BuySection t={t} />}
         {section === "licenses" && <LicensesSection t={t} />}
         {section === "subscriptions" && <SubscriptionsSection t={t} go={onSectionChange} />}
         {section === "billing" && <BillingSection t={t} />}
         {section === "support" && <SupportSection t={t} />}
-        {section === "profile" && <ProfileSection t={t} displayName={displayName} onSignOut={onSignOut} />}
+        {section === "profile" && <ProfileSection t={t} me={me} onMeChange={onMeChange} />}
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { CustomerSection } from "./customer-nav";
 import type { messages } from "./locale";
-import { loadPanelMe, SessionEndedError, type PanelMe } from "./panel-me";
+import { loadPanelMe, rememberLocalMe, SessionEndedError, type PanelMe } from "./panel-me";
 import { CustomerDashboard } from "./pages/customer-dashboard";
 import { ProfileMenu } from "./profile-menu";
 import { isCustomer } from "./roles";
@@ -42,6 +42,11 @@ export function Workspace({
 
   const customer = me ? isCustomer(me.roles) : false;
 
+  function handleMeChange(next: PanelMe) {
+    rememberLocalMe(next);
+    setMe(next);
+  }
+
   return (
     <div className="workspace">
       <header className="topbar">
@@ -72,10 +77,10 @@ export function Workspace({
         {me && customer && (
           <CustomerDashboard
             t={t}
-            displayName={me.display_name}
+            me={me}
+            onMeChange={handleMeChange}
             section={section}
             onSectionChange={setSection}
-            onSignOut={onSignOut}
           />
         )}
       </main>

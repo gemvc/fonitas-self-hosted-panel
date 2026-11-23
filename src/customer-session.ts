@@ -3,8 +3,7 @@ import type { PanelMe } from "./panel-me";
 
 /**
  * On-origin customer session for the OEM/application site UI.
- * Credentials stay on this page; Fonitas verification through same-origin PHP is planned
- * and not wired yet — see engineering handbook first milestone.
+ * Credentials stay on this page; Fonitas Identity email verification uses public auth routes.
  */
 export type CustomerSession = {
   access_token: string;
@@ -18,7 +17,7 @@ export function isLocalCustomerToken(token: string): boolean {
   return token.startsWith(LOCAL_PREFIX);
 }
 
-export function createLocalCustomerSession(displayName: string): CustomerSession {
+export function createLocalCustomerSession(displayName: string, email: string): CustomerSession {
   const name = displayName.trim() || "Customer";
   return {
     access_token: LOCAL_PREFIX + crypto.randomUUID().replaceAll("-", ""),
@@ -27,6 +26,8 @@ export function createLocalCustomerSession(displayName: string): CustomerSession
       display_name: name,
       roles: [CUSTOMER_ROLE],
       permissions: [],
+      email: email.trim().toLowerCase(),
+      email_verified: false,
     },
   };
 }
