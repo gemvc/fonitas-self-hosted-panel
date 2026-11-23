@@ -1,0 +1,17 @@
+.git
+.github
+.cursor
+node_modules
+dist
+dist-oem
+panel-oem.zip
+oem-release.json
+setup.php
+*.log
+.env
+.env.*
+!.env.example
+customer/.env
+**/.DS_Store
+agent-transcripts
+docs/design

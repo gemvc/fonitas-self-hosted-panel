@@ -43,8 +43,22 @@ final readonly class Installation
         return new self($id, $token, $origin);
     }
 
+    /** Development-phase: allow loopback. Set false before production lock-down. */
+    private const bool ALLOW_LOCALHOST_ORIGINS = true;
+
     private static function isOrigin(string $origin): bool
     {
+        if (self::ALLOW_LOCALHOST_ORIGINS
+            && preg_match('~\A(https|http)://(localhost|127\.0\.0\.1|\[::1\])(?::([1-9][0-9]{0,4}))?\z~', $origin, $loopback) === 1) {
+            if (!isset($loopback[3])) {
+                return true;
+            }
+            $defaultPort = $loopback[1] === 'https' ? 443 : 80;
+            $port = (int) $loopback[3];
+
+            return $port >= 1 && $port <= 65535 && $port !== $defaultPort;
+        }
+
         if (strlen($origin) > 268
             || !preg_match('~\Ahttps://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([1-9][0-9]{0,4}))?\z~', $origin, $parts)) {
             return false;

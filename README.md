@@ -21,6 +21,17 @@ Installation binding keeps the **domain connection key**. An **application API k
 
 [Engineering handbook](docs/engineering.md) · [Development and verification](docs/engineering.md#development-workflow) · [Agent entry point](AGENTS.md)
 
+## Docker (local test before push)
+
+```sh
+npm run docker:dev        # Vite UI → http://localhost:5173
+npm run docker:preview    # nginx build preview → http://localhost:4173
+npm run docker:customer   # PHP /api/health → http://localhost:8080
+npm run docker:down
+```
+
+Details: [Docker development](docs/engineering.md#docker-development).
+
 ## Release
 
 [Release requirements and signing](docs/engineering.md#releases)

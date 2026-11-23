@@ -10,6 +10,7 @@ This handbook is the repository's reference for architecture, API discovery, dev
 | Change the customer workspace or Identity role gate | This repository, React and TypeScript | [roles.ts](../src/roles.ts), [workspace.tsx](../src/workspace.tsx), [panel-me.ts](../src/panel-me.ts), [customer-home.tsx](../src/pages/customer-home.tsx) |
 | Change the customer PHP API or installation validation | This repository, server-side PHP | [customer/public/index.php](../customer/public/index.php), [customer/src](../customer/src/) |
 | Change allowed installation origins (HTTPS domain / localhost policy) | This repository, and Symfony origin validation | [origin.ts](../src/origin.ts), [installer `panelOrigin`](../installer/setup.php), Symfony [`isCustomOrigin`][panels] |
+| Change local Docker development images | This repository | [Dockerfile](../Dockerfile), [docker-compose.yml](../docker-compose.yml) |
 | Change OEM branding or the application summary | This repository, HTML and TypeScript | [oem.html](../oem.html), [oem.ts](../src/oem.ts), shared [styles.css](../src/styles.css) |
 | Change OEM setup, configuration, access, or updates | This repository, server-side PHP | [installer/setup.php](../installer/setup.php), especially `panelAction`, `panelRuntime`, `panelLatestRelease`, and `panelStageRelease` |
 | Change the organization admin's domain workflow | Hosted developer portal | [Custom Domains page][hosted-domains] |
@@ -92,7 +93,7 @@ The merged PHP foundation exposes one readiness route. It is available in the so
 | Key | Value |
 | --- | --- |
 | `APP_ID` | The public UUID of the application bound to this installation |
-| `PANEL_ORIGIN` | The exact registered HTTPS origin, including a non-default port if applicable. Omit the trailing slash and the default port `443`. |
+| `PANEL_ORIGIN` | The exact registered origin. Production uses HTTPS without a trailing slash or default port `443`. During development, loopback such as `http://localhost:5173` is accepted while `Installation::ALLOW_LOCALHOST_ORIGINS` remains enabled. |
 | `DOMAIN_TOKEN` | The OEM installation credential issued by activation. It starts with `fpi_`. The activation form uses a separate one-time key starting with `fpk_`. An activated OEM install stores the credential in its private state file. |
 
 3. Run the following commands from the repository root in separate terminals to check the local PHP route.
@@ -239,9 +240,31 @@ npm run build:oem
 php -l installer/setup.php
 ```
 
+### Docker development
+
+Use Docker to exercise the customer UI and optional customer PHP API on localhost before push. Origin policy already allows `http://localhost` during development.
+
+| Command | What it runs | URL |
+| --- | --- | --- |
+| `npm run docker:dev` | Vite panel with live reload (`docker compose up panel`) | http://localhost:5173 |
+| `npm run docker:preview` | Built static ZIP served by nginx | http://localhost:4173 |
+| `npm run docker:customer` | Customer PHP readiness API | http://localhost:8080/api/health |
+| `npm run docker:down` | Stop compose services | — |
+
+```sh
+docker compose up panel
+# optional production-shaped image
+docker build -t fonitas-self-hosted-panel .
+docker run --rm -p 4173:80 fonitas-self-hosted-panel
+```
+
+For the customer API profile, copy [`customer/.env.example`](../customer/.env.example) to `customer/.env`, set `APP_ID`, `DOMAIN_TOKEN` (`fpi_…`), and `PANEL_ORIGIN` (for local UI use `http://localhost:5173`), then `chmod 600 customer/.env`. Without a valid `.env`, `/api/health` returns `503`.
+
+Files: [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.yml), [`.dockerignore`](../.dockerignore).
+
 | Change | Verify |
 | --- | --- |
-| Static UI or authentication | Build the static output. Smoke-test pairing on an HTTPS domain and, while development localhost is enabled, on `http://localhost`. Confirm only `APP_END_USER` opens the customer home. Use `npm run dev` preview for local UI review |
+| Static UI or authentication | Build the static output, or use `npm run docker:dev` / `docker:preview`. Smoke-test pairing on an HTTPS domain and, while development localhost is enabled, on `http://localhost:5173`. Confirm only `APP_END_USER` opens the customer home |
 | Identity role mapping | Confirm `APP_END_USER` against [TenantRoleProvisioner][tenant-roles] and [RBAC][identity-rbac]. Do not add panel-only role names |
 | Origin / API-key detection | Keep domain connection-key flow. Document any new application API-key contract against Symfony before coding consumers. Cover allowed loopback and rejected non-local HTTP in Symfony origin tests |
 | OEM runtime or branding | Build the OEM output. Use a signed test release and a PHP site with trusted viewer identity. Verify an allowed viewer and an unlisted viewer, same-origin requests, and the intended display fields |

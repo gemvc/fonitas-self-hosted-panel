@@ -11,7 +11,11 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "build:oem": "npm run typecheck && vite build --config vite.oem.config.ts",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "docker:dev": "docker compose up panel",
+    "docker:preview": "docker compose --profile preview up --build preview",
+    "docker:customer": "docker compose --profile customer up customer",
+    "docker:down": "docker compose --profile customer --profile preview down"
   },
   "dependencies": {
     "react": "19.2.8",
