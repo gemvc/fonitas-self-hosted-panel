@@ -9,6 +9,7 @@ This handbook is the repository's reference for architecture, API discovery, dev
 | Change the static ZIP dashboard, pairing, or Fonitas sign-in | This repository, React and TypeScript | [index.html](../index.html), [main.tsx](../src/main.tsx), [panel-login.ts](../src/panel-login.ts) |
 | Change local workspace homes or Identity role mapping | This repository, React and TypeScript | [roles.ts](../src/roles.ts), [workspace.tsx](../src/workspace.tsx), [panel-me.ts](../src/panel-me.ts), [pages/](../src/pages/) |
 | Change the customer PHP API or installation validation | This repository, server-side PHP | [customer/public/index.php](../customer/public/index.php), [customer/src](../customer/src/) |
+| Change allowed installation origins (HTTPS domain / localhost policy) | This repository, and Symfony origin validation | [origin.ts](../src/origin.ts), [installer `panelOrigin`](../installer/setup.php), Symfony [`isCustomOrigin`][panels] |
 | Change OEM branding or the application summary | This repository, HTML and TypeScript | [oem.html](../oem.html), [oem.ts](../src/oem.ts), shared [styles.css](../src/styles.css) |
 | Change OEM setup, configuration, access, or updates | This repository, server-side PHP | [installer/setup.php](../installer/setup.php), especially `panelAction`, `panelRuntime`, `panelLatestRelease`, and `panelStageRelease` |
 | Change the organization admin's domain workflow | Hosted developer portal | [Custom Domains page][hosted-domains] |
@@ -22,19 +23,29 @@ The first release of the new customer dashboard is for signed-in buyers. It cove
 
 ### Product and roles
 
-Fonitas is a software publishing platform. The developer operates a branded dashboard on an HTTPS origin for one registered software application. A purchase associates the customer's Fonitas identity with that application through the purchase or license entitlement. The buyer is a direct customer of the software and uses Fonitas business services through the developer's brand. The developer uses those same services to run the software business.
+Fonitas is a software publishing platform. The developer operates a branded dashboard on their site or subdomain for one registered software application. **This dashboard’s primary audience is the application customer** (`APP_END_USER`): purchases, license term and type, upgrades, and related buyer views. Deep administration, organization tools, and staff desks stay on the hosted Fonitas portal unless a later product decision reopens local staff homes.
 
-Use **existing Symfony keys** only. Do not invent panel-only role names. Application-tenant roles are seeded by Identity [`TenantRoleProvisioner`][tenant-roles]. Organization membership and Fonitas-tenant roles stay on their own surfaces.
+Use **existing Symfony keys** only. Do not invent panel-only role names. Application-tenant roles are seeded by Identity [`TenantRoleProvisioner`][tenant-roles].
 
 | Actor | Existing backend key | Local dashboard | Hosted Fonitas |
 | --- | --- | --- | --- |
-| Organization administrator | `ORG_ADMIN` (organization membership) | Installation pairing and branding setup | Domain binding, connection keys, deep admin |
-| Application owner | `APP_OWNER` (seeded Identity role) | Administration overview (charts, lists) | Deep administration |
-| Application admin | `APP_ADMIN` (seeded Identity role) | Administration overview | Deep administration |
-| Support agent | Permission `support.ticket.assign` (optional custom role `APP_SUPPORT` is **not** seeded) | Support ticket inbox | — |
-| End user / buyer | `APP_END_USER` (seeded Identity role) | Purchases, license type and dates, upgrade entry | — |
+| End user / buyer | `APP_END_USER` | Customer home (primary product) | — |
+| Organization administrator | `ORG_ADMIN` | Install / pair only | Domain binding, connection keys, deep admin |
+| Application owner / admin | `APP_OWNER`, `APP_ADMIN` | Not the primary local audience | Deep administration |
+| Support agent | `support.ticket.assign` | Optional later; not required for customer-first scope | Support tools as provided on Fonitas |
 
-Fonitas supplies identity, purchasing and payments, licensing, invoices, support tickets, business email, and reporting. The self-hosted dashboard is the branded interface for those services. Gate actions with **permissions** from Identity; use roles only for coarse home selection. Symfony remains the authority for ownership, entitlement, and business records. See [local role workspaces](#local-role-workspaces-static-ui) for the static UI mapping.
+Fonitas supplies identity, purchasing and payments, licensing, invoices, support tickets, and reporting. Symfony remains the authority for ownership, entitlement, and business records. See [local role workspaces](#local-role-workspaces-static-ui) and [installation detection](#installation-detection-api-key-and-domain).
+
+### Installation detection (API key and domain)
+
+Target integration uses **two complementary identifiers**. Keep both; do not replace domain registration with an API key alone.
+
+| Identifier | Purpose | Current status |
+| --- | --- | --- |
+| **Domain / connection key** | Binds the exact installation origin (`Origin`) to an organization (and for OEM, one application). Pairing and OEM activation redeem the one-time connection key (`fpk_…`) for that origin | Live for panel pair / OEM activate |
+| **Application API key** | Lets frontend and backend detect **which software** the installation serves, independent of UI chrome | Planned. Document the Symfony producer and this consumer before locking request fields |
+
+During development, origin detection must accept a **registered domain URL** and **localhost** so engineers can run the dashboard without a public HTTPS host. Before production lock-down, **reject localhost** in the static client ([`ALLOW_LOCALHOST_ORIGINS`](../src/origin.ts)), the PHP installer ([`PANEL_DEV_ALLOW_LOCALHOST`](../installer/setup.php)), and Symfony [`isCustomOrigin`][panels]. Today Symfony still requires `https://` public hostnames only; extending it for development localhost is a required companion change and is **not verified** in this repository.
 
 ### First milestone: customer registration from the app site
 
@@ -56,8 +67,8 @@ The customer backend initially uses private environment configuration and an exi
 
 ### Target authorization and integration boundaries
 
-- Symfony resolves the bound application from the installation. Each customer operation checks the signed-in identity and ownership of the requested data within that application. Staff operations additionally enforce Identity permissions such as `support.ticket.assign` and, where applicable, organization membership (`ORG_ADMIN` / `ORG_MEMBER`) on hosted surfaces.
-- The hosted Fonitas sign-in flow supplies shared identity. Application-tenant access uses seeded roles `APP_OWNER`, `APP_ADMIN`, and `APP_END_USER`. Customer authorization for purchases derives from Fonitas purchase or license data. The same account can have different access across applications.
+- Symfony resolves the bound application from the installation (domain / connection key today; application API key when that contract ships). Each customer operation checks the signed-in identity and ownership of the requested data within that application.
+- The hosted Fonitas sign-in flow supplies shared identity. Local buyer access targets `APP_END_USER`. Customer authorization for purchases derives from Fonitas purchase or license data.
 - Keep application business state in Fonitas. The self-hosted site stores the installation state, branding, static assets, and the configuration needed to serve its own dashboard.
 - Treat the flows in this section as requirements for future API and frontend work. Verify the producer and consumer before documenting concrete routes, request fields, or compatibility guarantees. The [current API contracts](#api-contracts) describe the existing routes only.
 
@@ -113,25 +124,26 @@ The current releases give software developers and authorized viewers a read-only
 
 ### Local role workspaces (static UI)
 
-The static React client is the local frontend for the bound application on the developer site or subdomain. Fonitas-hosted surfaces stay minimal for day-to-day use: organization domain binding, connection keys, and deep administration remain on the hosted portal. Local homes own overview charts and lists, support tickets, and customer purchases.
-
-Workspace homes follow **existing Identity application-tenant roles** from Symfony `TenantRoleProvisioner`, not panel-invented keys:
+The static React client is the local frontend for the bound application. Product direction is **customer-first** (`APP_END_USER`). Other seeded Identity roles remain mapped in [`roles.ts`](../src/roles.ts) for development previews and possible later homes; they are not the primary shipped audience.
 
 | Identity role / permission | Local UI | Notes |
 | --- | --- | --- |
-| `APP_OWNER`, `APP_ADMIN` | Administration overview | Seeded on every non-reserved tenant. Deep admin stays on hosted Fonitas |
-| `support.ticket.assign` (permission) | Support inbox | Real Support-domain permission. Optional custom role key `APP_SUPPORT` exists in API examples but is **not** seeded |
-| `APP_END_USER` | Customer purchases / license | Seeded; no Identity permissions by default |
+| `APP_END_USER` | Customer purchases / license | Primary local dashboard audience |
+| `APP_OWNER`, `APP_ADMIN` | Administration overview (preview / later) | Deep admin stays on hosted Fonitas |
+| `support.ticket.assign` | Support inbox (preview / later) | Real Support permission; optional custom `APP_SUPPORT` is **not** seeded |
 
-Related roles that belong elsewhere (do not invent local substitutes):
+Related keys that belong elsewhere: `ORG_ADMIN` / `ORG_MEMBER` (hosted publisher), `APPLICATION_DEVELOPER` / `FONITAS_CUSTOMER` (Fonitas tenant), staff system roles.
 
-| Key | Where it lives |
+Identity `GET /api/v1/auth/me` returns `display_name`, `roles`, and `permissions`. Prefer **permissions** for action gates. The developer-panel bearer session does not expose this identity yet; the client’s `/session/me` loader is an unverified bridge.
+
+### Origin policy (domain and localhost)
+
+| Phase | Allowed installation origins |
 | --- | --- |
-| `ORG_ADMIN`, `ORG_MEMBER` | Organization membership for the hosted publisher console |
-| `APPLICATION_DEVELOPER`, `FONITAS_CUSTOMER` | Fonitas tenant Identity roles |
-| `SUPER_ADMIN`, `FONITAS_QA`, `SYSTEM_ADMIN`, `FONITAS_SUPPORT` | Fonitas system roles / staff |
+| **Development** (current) | `https://` registered domain URLs, and `http://localhost` / `127.0.0.1` / `[::1]` (with optional port) |
+| **Production lock-down** | `https://` registered domain URLs only. Set `ALLOW_LOCALHOST_ORIGINS` and `PANEL_DEV_ALLOW_LOCALHOST` to `false`, and keep Symfony `isCustomOrigin` rejecting loopback |
 
-Identity `GET /api/v1/auth/me` returns `display_name`, `roles`, and `permissions`. Prefer **permissions** for action gates. The developer-panel bearer session does not expose this identity yet; the client’s `/session/me` loader is an unverified bridge. The previous paginated applications list is no longer the signed-in home.
+The static UI uses [`isAllowedPanelOrigin`](../src/origin.ts) before pairing and sign-in. OEM PHP uses [`panelOrigin`](../installer/setup.php). Backend registration and pair/activate still call Symfony `isCustomOrigin`, which currently allows only `https://` public hostnames without ports — **localhost pairing against production API will fail until that rule is extended for development**.
 
 ### Static trust flow
 
@@ -219,8 +231,9 @@ php -l installer/setup.php
 
 | Change | Verify |
 | --- | --- |
-| Static UI or authentication | Build the static output. Smoke-test exact-origin pairing, hosted consent and callback, workspace home selection for `APP_OWNER` / `APP_ADMIN` / `APP_END_USER` and `support.ticket.assign`, sign-out confirmation and retry on an HTTPS test site. Use `npm run dev` preview buttons only for local UI review |
+| Static UI or authentication | Build the static output. Smoke-test pairing on an HTTPS domain and, while development localhost is enabled, on `http://localhost`. Confirm production lock-down rejects localhost. Prefer customer (`APP_END_USER`) home checks. Use `npm run dev` preview buttons only for local UI review |
 | Identity role mapping | Confirm keys against [TenantRoleProvisioner][tenant-roles] and [RBAC][identity-rbac]. Do not add panel-only role names |
+| Origin / API-key detection | Keep domain connection-key flow. Document any new application API-key contract against Symfony before coding consumers. When enabling localhost in Symfony, cover allowed loopback and rejected non-local HTTP |
 | OEM runtime or branding | Build the OEM output. Use a signed test release and a PHP site with trusted viewer identity. Verify an allowed viewer and an unlisted viewer, same-origin requests, and the intended display fields |
 | Installer, state, or release | Check PHP syntax. In a disposable document root and private directory, exercise installation, failed verification, update confirmation and rollback. Confirm that branding and access settings survive the update |
 | Hosted admin changes | Update or run the [hosted Custom Domains browser tests][hosted-tests] in the hosted repository |
@@ -257,7 +270,8 @@ The upload contains the three PHP files and the public rewrite configuration. Ke
 | Configuration | Owner and behavior |
 | --- | --- |
 | `PANEL_DATA_DIR` | PHP environment override. Use an absolute path outside the document root, owned by the PHP worker, with mode `0700`. By default, PHP uses a hidden sibling of the document root. Keep this directory across deployments and outside all public web mappings |
-| `PANEL_ORIGIN` | PHP environment override for an HTTPS-terminating proxy. Set the exact origin and restrict direct access to the PHP origin server |
+| `PANEL_ORIGIN` | PHP environment override for an HTTPS-terminating proxy (or an exact development origin). Set the exact origin and restrict direct access to the PHP origin server |
+| `PANEL_DEV_ALLOW_LOCALHOST` | Compile-time constant in `setup.php`. `true` during development so `http://localhost` loopback origins work; set `false` before production lock-down |
 | `state.json` | Installer-owned private state. Holds origin, management password hash, the installation credential, branding, permitted identities, and active and previous versions. Setup writes it atomically. Change settings through the management page |
 | `REMOTE_USER` | Trusted identity supplied by the site's web-server authentication module. Matching against the private list is exact |
 
@@ -307,6 +321,8 @@ For an OEM rollout, deploy Symfony with the [Organization migration][migration] 
 | --- | --- |
 | Target customer and developer experience | [Product direction for the OEM dashboard](#product-direction-for-the-oem-dashboard) |
 | Application-tenant role keys and default permissions | [TenantRoleProvisioner][tenant-roles], [Identity RBAC][identity-rbac], [roles.ts](../src/roles.ts) |
+| Allowed installation origins (domain / localhost) | [origin.ts](../src/origin.ts), [panelOrigin](../installer/setup.php), Symfony [isCustomOrigin][panels] |
+| Application API key for software detection | Planned — verify Symfony producer before documenting fields |
 | Support ticket assign permission | [Support domain][support-domain], permission `support.ticket.assign` |
 | Routes, DTOs, response envelopes, and allowed browser origins | [Symfony panel controller][panel-controller], [session controller][session-controller], [CORS subscriber][cors] |
 | Installation keys and lifecycle | [DeveloperPanels][panels], [backend Organization reference][backend-organization] |

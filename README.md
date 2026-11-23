@@ -1,10 +1,8 @@
 # Fonitas Self-Hosted Developer Panel
 
-Run a software dashboard on your own HTTPS domain. The [product direction](docs/engineering.md#product-direction-for-the-oem-dashboard) defines a branded customer dashboard for one registered application with purchases and licenses for signed-in customers.
+Run a software dashboard on your own domain or, during development, on localhost. The [product direction](docs/engineering.md#product-direction-for-the-oem-dashboard) is a **customer-first** branded panel for one registered application (`APP_END_USER`), with purchases and licenses for signed-in customers.
 
-Local workspace homes follow **existing Identity roles** seeded for application tenants: `APP_OWNER`, `APP_ADMIN`, and `APP_END_USER`. Support uses permission `support.ticket.assign`. See [local role workspaces](docs/engineering.md#local-role-workspaces-static-ui).
-
-Current releases: the static ZIP uses Fonitas sign-in and role-based homes (identity bridge unverified). The branded PHP dashboard shows one bound application and uses the host's sign-in.
+Installation binding keeps the **domain connection key**. An **application API key** will identify the software once the Symfony contract is verified. Development allows HTTPS domains and localhost; production lock-down rejects localhost. See [installation detection](docs/engineering.md#installation-detection-api-key-and-domain) and [origin policy](docs/engineering.md#origin-policy-domain-and-localhost).
 
 ## Install or update
 

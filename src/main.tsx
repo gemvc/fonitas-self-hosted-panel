@@ -2,13 +2,14 @@ import { StrictMode, useCallback, useEffect, useState, type FormEvent } from "re
 import { createRoot } from "react-dom/client";
 import { messages, type Language } from "./locale";
 import { completePanelSignIn, panelRequest, startPanelSignIn, type PanelSession } from "./panel-login";
+import { isAllowedPanelOrigin } from "./origin";
 import { setPreviewMe } from "./panel-me";
 import { SUPPORT_ASSIGN_PERMISSION, type SeededAppRole } from "./roles";
 import { Workspace } from "./workspace";
 import "./styles.css";
 
 const hostedSettings = "https://developerpannel.fonitas.com/settings/custom-domains";
-const secure = window.location.protocol === "https:";
+const allowedOrigin = isAllowedPanelOrigin();
 let pendingSession = completePanelSignIn();
 void pendingSession?.catch(() => {});
 
@@ -136,7 +137,7 @@ function Panel() {
           <p role="alert" className="error">{t.signOutFailed}</p>
           <button type="button" onClick={() => void signOut(signOutState.token)}>{t.retrySignOut}</button>
         </div>}
-        {secure && <button className="primary full" type="button" onClick={signIn}
+        {allowedOrigin && <button className="primary full" type="button" onClick={signIn}
           disabled={signingIn || signOutState?.status === "pending"}>{t.signIn}</button>}
         {signInFailed && <p role="alert" className="error">{t.signInFailed}</p>}
         <Pairing t={t} />
@@ -162,7 +163,7 @@ function Pairing({ t }: { t: Text }) {
 
   async function pair(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!secure || busy) return;
+    if (!allowedOrigin || busy) return;
     const key = String(new FormData(event.currentTarget).get("key") ?? "").trim();
     if (!/^fpk_[0-9a-f]{64}$/.test(key)) {
       setError("invalidKey");
@@ -193,7 +194,7 @@ function Pairing({ t }: { t: Text }) {
       <p className="origin"><bdi>{window.location.origin}</bdi></p>
       {connected ? (
         <p role="status">{t.connected}</p>
-      ) : secure ? (
+      ) : allowedOrigin ? (
         <form onSubmit={pair}>
           <label>{t.key}
             <input name="key" type="password" dir="ltr" autoComplete="off" spellCheck={false} required disabled={busy} />

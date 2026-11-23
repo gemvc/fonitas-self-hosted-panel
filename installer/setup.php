@@ -8,6 +8,8 @@ const PANEL_MINIMUM_RELEASE = '__PANEL_MINIMUM_RELEASE__';
 const PANEL_PUBLIC_KEY = '__PANEL_RELEASE_PUBLIC_KEY__';
 const PANEL_INDEX = "<?php\ndefine('PANEL_RUNTIME', true);\nrequire __DIR__.'/setup.php';\n";
 const PANEL_FILES = '~\A(?:oem\.html|assets/[A-Za-z0-9_-]+\.(?:css|js))\z~D';
+/** Development-phase origin policy. Set false before production lock-down so localhost is rejected. */
+const PANEL_DEV_ALLOW_LOCALHOST = true;
 
 function panelFail(int $status, string $message): never
 {
@@ -21,19 +23,47 @@ function panelEscape(string $value): string
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+function panelIsLoopbackHost(string $host): bool
+{
+    $normalized = str_starts_with($host, '[') ? substr($host, 1, -1) : $host;
+
+    return $normalized === 'localhost' || $normalized === '127.0.0.1' || $normalized === '::1';
+}
+
 function panelOrigin(): string
 {
-    $authority = preg_replace('~:443\z~', '', strtolower($_SERVER['HTTP_HOST'] ?? ''));
-    $configured = getenv('PANEL_ORIGIN');
-    $origin = $configured === false ? 'https://'.$authority : $configured;
     $https = in_array(strtolower($_SERVER['HTTPS'] ?? ''), ['on', '1'], true);
-    if (strlen($origin) > 268 || preg_match('~\Ahttps://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?\z~', $origin, $parts) !== 1
-        || substr($origin, 8) !== $authority || (!$https && $configured === false)) {
+    $authority = strtolower($_SERVER['HTTP_HOST'] ?? '');
+    $authority = preg_replace($https ? '~:443\z~' : '~:80\z~', '', $authority) ?? $authority;
+    $configured = getenv('PANEL_ORIGIN');
+    if ($configured !== false) {
+        $origin = $configured;
+    } elseif ($https) {
+        $origin = 'https://'.$authority;
+    } elseif (PANEL_DEV_ALLOW_LOCALHOST) {
+        $origin = 'http://'.$authority;
+    } else {
         panelFail(400, 'Open this panel through its configured HTTPS address.');
     }
 
-    $host = $parts[1];
-    $port = isset($parts[2]) ? (int) $parts[2] : 443;
+    if (strlen($origin) > 268 || preg_match('~\A(https|http)://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?\z~', $origin, $parts) !== 1) {
+        panelFail(400, 'Open this panel through its configured HTTPS address.');
+    }
+
+    $scheme = $parts[1];
+    $host = $parts[2];
+    $port = isset($parts[3]) ? (int) $parts[3] : ($scheme === 'https' ? 443 : 80);
+    $prefix = $scheme.'://';
+    if (!str_starts_with($origin, $prefix) || substr($origin, strlen($prefix)) !== $authority) {
+        panelFail(400, 'Open this panel through its configured HTTPS address.');
+    }
+    if ($scheme === 'http' && (!PANEL_DEV_ALLOW_LOCALHOST || !panelIsLoopbackHost($host))) {
+        panelFail(400, 'Open this panel through its configured HTTPS address.');
+    }
+    if ($scheme === 'https' && !$https && $configured === false) {
+        panelFail(400, 'Open this panel through its configured HTTPS address.');
+    }
+
     $validHost = str_starts_with($host, '[')
         ? filter_var(substr($host, 1, -1), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false
         : filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) !== false;
