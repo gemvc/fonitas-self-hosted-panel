@@ -36,19 +36,35 @@ final readonly class Installation
         $origin = $settings['PANEL_ORIGIN'] ?? null;
         if (!is_string($id) || !preg_match('/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/', $id)
             || !is_string($token) || !preg_match('/\Afpi_[0-9a-f]{64}\z/', $token)
-            || !is_string($origin) || !self::isOrigin($origin)) {
+            || !is_string($origin) || !self::isOrigin($origin, $settings)) {
             throw new \RuntimeException('Installation configuration is invalid.');
         }
 
         return new self($id, $token, $origin);
     }
 
-    /** Development-phase: allow loopback. Set false before production lock-down. */
-    private const bool ALLOW_LOCALHOST_ORIGINS = true;
-
-    private static function isOrigin(string $origin): bool
+    /**
+     * Fail-closed: loopback only when APP_ENV is dev|development and PANEL_ALLOW_LOCALHOST is true.
+     * Values may come from the installation `.env` (parsed settings) or process environment.
+     *
+     * @param array<string, mixed> $settings
+     */
+    private static function allowsLocalhost(array $settings = []): bool
     {
-        if (self::ALLOW_LOCALHOST_ORIGINS
+        $rawEnv = $settings['APP_ENV'] ?? getenv('APP_ENV');
+        $rawFlag = $settings['PANEL_ALLOW_LOCALHOST'] ?? getenv('PANEL_ALLOW_LOCALHOST');
+        $env = strtolower((string) ($rawEnv !== false && $rawEnv !== null && $rawEnv !== '' ? $rawEnv : 'production'));
+        $flag = strtolower((string) ($rawFlag !== false && $rawFlag !== null && $rawFlag !== '' ? $rawFlag : 'false'));
+        $dev = $env === 'dev' || $env === 'development';
+        $enabled = in_array($flag, ['1', 'true', 'yes'], true);
+
+        return $dev && $enabled;
+    }
+
+    /** @param array<string, mixed> $settings */
+    private static function isOrigin(string $origin, array $settings = []): bool
+    {
+        if (self::allowsLocalhost($settings)
             && preg_match('~\A(https|http)://(localhost|127\.0\.0\.1|\[::1\])(?::([1-9][0-9]{0,4}))?\z~', $origin, $loopback) === 1) {
             if (!isset($loopback[3])) {
                 return true;

@@ -1,9 +1,10 @@
 /**
- * Development-phase origin policy.
- * Allow http://localhost (and loopback) alongside https:// domain URLs.
- * Set to false before production lock-down so localhost is rejected.
+ * Fail-closed loopback policy for the static panel.
+ * Loopback HTTP is allowed only in Vite development (`import.meta.env.DEV`)
+ * when `VITE_ALLOW_LOCALHOST_ORIGINS=true`. Production builds never allow it.
  */
-export const ALLOW_LOCALHOST_ORIGINS = true;
+export const ALLOW_LOCALHOST_ORIGINS =
+  import.meta.env.DEV && import.meta.env.VITE_ALLOW_LOCALHOST_ORIGINS === "true";
 
 export function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";

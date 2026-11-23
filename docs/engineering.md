@@ -9,7 +9,7 @@ This handbook is the repository's reference for architecture, API discovery, dev
 | Change the static ZIP dashboard, pairing, or Fonitas sign-in | This repository, React and TypeScript | [index.html](../index.html), [main.tsx](../src/main.tsx), [panel-login.ts](../src/panel-login.ts) |
 | Change the customer workspace or Identity role gate | This repository, React and TypeScript | [roles.ts](../src/roles.ts), [workspace.tsx](../src/workspace.tsx), [panel-me.ts](../src/panel-me.ts), [customer-home.tsx](../src/pages/customer-home.tsx) |
 | Change the customer PHP API or installation validation | This repository, server-side PHP | [customer/public/index.php](../customer/public/index.php), [customer/src](../customer/src/) |
-| Change allowed installation origins (HTTPS domain / localhost policy) | This repository, and Symfony origin validation | [origin.ts](../src/origin.ts), [installer `panelOrigin`](../installer/setup.php), Symfony [`isCustomOrigin`][panels] |
+| Change allowed installation origins (HTTPS domain / localhost policy) | This repository, and Symfony origin validation | [origin.ts](../src/origin.ts), [installer `panelOrigin`](../installer/setup.php), Symfony [`DeveloperPanelOriginPolicy`][panels] |
 | Change local Docker development images | This repository | [Dockerfile](../Dockerfile), [docker-compose.yml](../docker-compose.yml) |
 | Change OEM branding or the application summary | This repository, HTML and TypeScript | [oem.html](../oem.html), [oem.ts](../src/oem.ts), shared [styles.css](../src/styles.css) |
 | Change OEM setup, configuration, access, or updates | This repository, server-side PHP | [installer/setup.php](../installer/setup.php), especially `panelAction`, `panelRuntime`, `panelLatestRelease`, and `panelStageRelease` |
@@ -46,15 +46,16 @@ Target integration uses **two complementary identifiers**. Keep both; do not rep
 | **Domain / connection key** | Binds the exact installation origin (`Origin`) to an organization (and for OEM, one application). Pairing and OEM activation redeem the one-time connection key (`fpk_…`) for that origin | Live for panel pair / OEM activate |
 | **Application API key** | Lets frontend and backend detect **which software** the installation serves, independent of UI chrome | Planned. Document the Symfony producer and this consumer before locking request fields |
 
-During development, origin detection accepts a **registered domain URL** and **localhost** so engineers can run the dashboard without a public HTTPS host. Before production lock-down, **reject localhost** by setting these flags to `false`:
+Loopback origins are **fail-closed**. They are allowed only when an explicit env flag is boolean-true **and** the runtime is development. Missing env is treated as `false`. Production / prod builds always reject loopback even if a flag is accidentally `true`.
 
-| Layer | Flag |
-| --- | --- |
-| Static client | [`ALLOW_LOCALHOST_ORIGINS`](../src/origin.ts) |
-| PHP installer / OEM | [`PANEL_DEV_ALLOW_LOCALHOST`](../installer/setup.php) |
-| Symfony | [`DeveloperPanels::ALLOW_LOCALHOST_ORIGINS`][panels] |
+| Layer | Development enablement | Production |
+| --- | --- | --- |
+| Static client (Vite) | `import.meta.env.DEV` **and** `VITE_ALLOW_LOCALHOST_ORIGINS=true` (set in gitignored `.env` / `.env.development.local`; see [`.env.example`](../.env.example)) | Production builds (`import.meta.env.DEV === false`) never allow loopback |
+| PHP installer / OEM | `APP_ENV=dev` or `development` **and** `PANEL_ALLOW_LOCALHOST=true` | Defaults reject loopback |
+| Customer PHP | Same `APP_ENV` + `PANEL_ALLOW_LOCALHOST` (from process env or `customer/.env`) | Defaults reject loopback |
+| Symfony | `APP_ENV=dev` **and** `PANEL_ALLOW_LOCALHOST_ORIGINS=true` (`.env.dev` sets true; `.env` defaults false) | `APP_ENV=prod` always rejects loopback |
 
-Symfony now accepts `http://localhost`, `http://127.0.0.1`, and `http://[::1]` (optional port) while that constant is `true`. Verify the backend change is deployed before relying on localhost pairing against a remote API.
+Verify Symfony is deployed with the dual-gate policy before relying on localhost pairing against a remote API.
 
 ### First milestone: customer registration from the app site
 
@@ -93,8 +94,10 @@ The merged PHP foundation exposes one readiness route. It is available in the so
 | Key | Value |
 | --- | --- |
 | `APP_ID` | The public UUID of the application bound to this installation |
-| `PANEL_ORIGIN` | The exact registered origin. Production uses HTTPS without a trailing slash or default port `443`. During development, loopback such as `http://localhost:5173` is accepted while `Installation::ALLOW_LOCALHOST_ORIGINS` remains enabled. |
+| `PANEL_ORIGIN` | The exact registered origin. Production uses HTTPS without a trailing slash or default port `443`. Loopback such as `http://localhost:5173` is accepted only when `APP_ENV` is `dev`/`development` and `PANEL_ALLOW_LOCALHOST=true`. |
 | `DOMAIN_TOKEN` | The OEM installation credential issued by activation. It starts with `fpi_`. The activation form uses a separate one-time key starting with `fpk_`. An activated OEM install stores the credential in its private state file. |
+| `APP_ENV` | Defaults to `production`. Use `development` (or `dev`) only for local Docker / local PHP. |
+| `PANEL_ALLOW_LOCALHOST` | Defaults to `false`. Set `true` only together with a development `APP_ENV` when using a loopback `PANEL_ORIGIN`. |
 
 3. Run the following commands from the repository root in separate terminals to check the local PHP route.
 
@@ -139,22 +142,21 @@ Identity `GET /api/v1/auth/me` returns `display_name`, `roles`, and `permissions
 
 ### Origin policy (domain and localhost)
 
-| Phase | Allowed installation origins |
+| Mode | Allowed installation origins |
 | --- | --- |
-| **Development** (current) | `https://` registered domain URLs, and `http://localhost` / `127.0.0.1` / `[::1]` (with optional port) |
-| **Production lock-down** | `https://` registered domain URLs only. Set the three `ALLOW_*_LOCALHOST*` / `ALLOW_LOCALHOST_ORIGINS` flags to `false` |
+| **Default / production** | Canonical `https://` public hosts (optional non-default port). Loopback is rejected. |
+| **Local development** | Same HTTPS hosts, plus `http(s)://localhost` / `127.0.0.1` / `[::1]` (optional port) **only** when the layer’s env flag is true **and** the runtime is development (see [installation detection](#installation-detection-api-key-and-domain)). |
 
-The static UI uses [`isAllowedPanelOrigin`](../src/origin.ts) before pairing and sign-in. OEM PHP uses [`panelOrigin`](../installer/setup.php). Symfony uses [`DeveloperPanels::isCustomOrigin`][panels].
+The static UI uses [`isAllowedPanelOrigin`](../src/origin.ts) before pairing and sign-in. OEM PHP uses [`panelOrigin`](../installer/setup.php) / `panelAllowsLocalhost()`. Customer PHP uses [`Installation`](../customer/src/Installation.php). Symfony uses [`DeveloperPanelOriginPolicy`][panels].
 
 ### Next steps
 
 | Order | Work | Owner |
 | --- | --- | --- |
-| 1 | Deploy / verify Symfony localhost origin acceptance with the self-hosted client | `symfony_fonitas` + this repo |
+| 1 | Deploy / verify Symfony fail-closed localhost origin policy with the self-hosted client | `symfony_fonitas` + this repo |
 | 2 | Verified buyer identity on the panel session (`APP_END_USER` from a real contract, not only `/session/me` bridge) | Symfony + static client |
 | 3 | Customer purchase / license / upgrade API consumers against verified License routes | This repo + Symfony License |
 | 4 | Application API key contract for software detection (keep domain connection key) | Symfony first, then this repo |
-| 5 | Production lock-down: disable localhost flags in all three layers | This repo + Symfony |
 
 ### Static trust flow
 
@@ -242,7 +244,7 @@ php -l installer/setup.php
 
 ### Docker development
 
-Use Docker to exercise the customer UI and optional customer PHP API on localhost before push. Origin policy already allows `http://localhost` during development.
+Use Docker to exercise the customer UI and optional customer PHP API on localhost before push. Loopback is fail-closed: enable it only via local env (see [origin policy](#origin-policy-domain-and-localhost)).
 
 | Command | What it runs | URL |
 | --- | --- | --- |
@@ -252,19 +254,20 @@ Use Docker to exercise the customer UI and optional customer PHP API on localhos
 | `npm run docker:down` | Stop compose services | — |
 
 ```sh
+# Vite: copy .env.example → .env (or .env.development.local) and set VITE_ALLOW_LOCALHOST_ORIGINS=true
 docker compose up panel
-# optional production-shaped image
+# optional production-shaped image (never allows loopback HTTP)
 docker build -t fonitas-self-hosted-panel .
 docker run --rm -p 4173:80 fonitas-self-hosted-panel
 ```
 
-For the customer API profile, copy [`customer/.env.example`](../customer/.env.example) to `customer/.env`, set `APP_ID`, `DOMAIN_TOKEN` (`fpi_…`), and `PANEL_ORIGIN` (for local UI use `http://localhost:5173`), then `chmod 600 customer/.env`. Without a valid `.env`, `/api/health` returns `503`.
+For the customer API profile, copy [`customer/.env.example`](../customer/.env.example) to `customer/.env`, set `APP_ID`, `DOMAIN_TOKEN` (`fpi_…`), and `PANEL_ORIGIN`. For local UI use `PANEL_ORIGIN=http://localhost:5173` with `APP_ENV=development` and `PANEL_ALLOW_LOCALHOST=true`, then `chmod 600 customer/.env`. Compose also sets those two vars on the `customer` service. Without a valid `.env`, `/api/health` returns `503`.
 
 Files: [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.yml), [`.dockerignore`](../.dockerignore).
 
 | Change | Verify |
 | --- | --- |
-| Static UI or authentication | Build the static output, or use `npm run docker:dev` / `docker:preview`. Smoke-test pairing on an HTTPS domain and, while development localhost is enabled, on `http://localhost:5173`. Confirm only `APP_END_USER` opens the customer home |
+| Static UI or authentication | Build the static output, or use `npm run docker:dev` / `docker:preview`. Smoke-test pairing on an HTTPS domain and, with `VITE_ALLOW_LOCALHOST_ORIGINS=true` in a gitignored Vite env file, on `http://localhost:5173`. Confirm only `APP_END_USER` opens the customer home |
 | Identity role mapping | Confirm `APP_END_USER` against [TenantRoleProvisioner][tenant-roles] and [RBAC][identity-rbac]. Do not add panel-only role names |
 | Origin / API-key detection | Keep domain connection-key flow. Document any new application API-key contract against Symfony before coding consumers. Cover allowed loopback and rejected non-local HTTP in Symfony origin tests |
 | OEM runtime or branding | Build the OEM output. Use a signed test release and a PHP site with trusted viewer identity. Verify an allowed viewer and an unlisted viewer, same-origin requests, and the intended display fields |
@@ -304,7 +307,8 @@ The upload contains the three PHP files and the public rewrite configuration. Ke
 | --- | --- |
 | `PANEL_DATA_DIR` | PHP environment override. Use an absolute path outside the document root, owned by the PHP worker, with mode `0700`. By default, PHP uses a hidden sibling of the document root. Keep this directory across deployments and outside all public web mappings |
 | `PANEL_ORIGIN` | PHP environment override for an HTTPS-terminating proxy (or an exact development origin). Set the exact origin and restrict direct access to the PHP origin server |
-| `PANEL_DEV_ALLOW_LOCALHOST` | Compile-time constant in `setup.php`. `true` during development so `http://localhost` loopback origins work; set `false` before production lock-down |
+| `APP_ENV` | Process environment. Defaults to `production`. Use `dev` or `development` only for local loopback |
+| `PANEL_ALLOW_LOCALHOST` | Process environment. Defaults to `false`. Together with a development `APP_ENV`, allows `http://localhost` loopback origins via `panelAllowsLocalhost()` |
 | `state.json` | Installer-owned private state. Holds origin, management password hash, the installation credential, branding, permitted identities, and active and previous versions. Setup writes it atomically. Change settings through the management page |
 | `REMOTE_USER` | Trusted identity supplied by the site's web-server authentication module. Matching against the private list is exact |
 
@@ -354,7 +358,7 @@ For an OEM rollout, deploy Symfony with the [Organization migration][migration] 
 | --- | --- |
 | Target customer and developer experience | [Product direction for the OEM dashboard](#product-direction-for-the-oem-dashboard) |
 | Application-tenant role keys and default permissions | [TenantRoleProvisioner][tenant-roles], [Identity RBAC][identity-rbac], [roles.ts](../src/roles.ts) |
-| Allowed installation origins (domain / localhost) | [origin.ts](../src/origin.ts), [panelOrigin](../installer/setup.php), Symfony [isCustomOrigin][panels] |
+| Allowed installation origins (domain / localhost) | [origin.ts](../src/origin.ts), [panelOrigin](../installer/setup.php), [Installation](../customer/src/Installation.php), Symfony [DeveloperPanelOriginPolicy][panels] |
 | Application API key for software detection | Planned — verify Symfony producer before documenting fields |
 | Support ticket assign permission | [Support domain][support-domain], permission `support.ticket.assign` |
 | Routes, DTOs, response envelopes, and allowed browser origins | [Symfony panel controller][panel-controller], [session controller][session-controller], [CORS subscriber][cors] |
@@ -373,7 +377,7 @@ When sources disagree, inspect producer and consumer at the relevant Git refs an
 [panel-controller]: https://github.com/gemvc/symfony_fonitas/blob/main/src/Organization/Presentation/Http/Rest/DeveloperPanel/DeveloperPanelController.php
 [session-controller]: https://github.com/gemvc/symfony_fonitas/blob/main/src/Organization/Presentation/Http/Rest/DeveloperPanel/DeveloperPanelSessionsController.php
 [cors]: https://github.com/gemvc/symfony_fonitas/blob/main/src/Shared/Infrastructure/Http/CorsSubscriber.php
-[panels]: https://github.com/gemvc/symfony_fonitas/blob/main/src/Organization/Application/DeveloperPanel/DeveloperPanels.php
+[panels]: https://github.com/gemvc/symfony_fonitas/blob/main/src/Organization/Application/DeveloperPanel/DeveloperPanelOriginPolicy.php
 [sessions]: https://github.com/gemvc/symfony_fonitas/blob/main/src/Organization/Application/DeveloperPanel/DeveloperPanelSessions.php
 [oem-service]: https://github.com/gemvc/symfony_fonitas/blob/main/src/Organization/Application/DeveloperPanel/OemDeveloperPanel.php
 [panel-applications]: https://github.com/gemvc/symfony_fonitas/blob/main/src/Organization/Application/DeveloperPanel/DeveloperPanelApplications.php

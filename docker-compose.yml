@@ -19,6 +19,9 @@ services:
       - "5173:5173"
     environment:
       CHOKIDAR_USEPOLLING: "true"
+      # Prefer a gitignored root `.env` / `.env.development.local` with VITE_ALLOW_LOCALHOST_ORIGINS=true.
+      # Compose can also inject it for local Docker without committing the value:
+      VITE_ALLOW_LOCALHOST_ORIGINS: "true"
 
   customer:
     image: php:8.2-cli-bookworm
@@ -28,6 +31,9 @@ services:
     command: php -S 0.0.0.0:8080 -t customer/public customer/public/index.php
     ports:
       - "8080:8080"
+    environment:
+      APP_ENV: development
+      PANEL_ALLOW_LOCALHOST: "true"
     profiles:
       - customer
 

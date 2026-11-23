@@ -8,9 +8,6 @@ const PANEL_MINIMUM_RELEASE = '__PANEL_MINIMUM_RELEASE__';
 const PANEL_PUBLIC_KEY = '__PANEL_RELEASE_PUBLIC_KEY__';
 const PANEL_INDEX = "<?php\ndefine('PANEL_RUNTIME', true);\nrequire __DIR__.'/setup.php';\n";
 const PANEL_FILES = '~\A(?:oem\.html|assets/[A-Za-z0-9_-]+\.(?:css|js))\z~D';
-/** Development-phase origin policy. Set false before production lock-down so localhost is rejected. */
-const PANEL_DEV_ALLOW_LOCALHOST = true;
-
 function panelFail(int $status, string $message): never
 {
     http_response_code($status);
@@ -21,6 +18,17 @@ function panelFail(int $status, string $message): never
 function panelEscape(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+/** Fail-closed: loopback only when APP_ENV is dev|development and PANEL_ALLOW_LOCALHOST is true. */
+function panelAllowsLocalhost(): bool
+{
+    $env = strtolower((string) (getenv('APP_ENV') !== false ? getenv('APP_ENV') : 'production'));
+    $flag = strtolower((string) (getenv('PANEL_ALLOW_LOCALHOST') !== false ? getenv('PANEL_ALLOW_LOCALHOST') : 'false'));
+    $dev = $env === 'dev' || $env === 'development';
+    $enabled = in_array($flag, ['1', 'true', 'yes'], true);
+
+    return $dev && $enabled;
 }
 
 function panelIsLoopbackHost(string $host): bool
@@ -40,7 +48,7 @@ function panelOrigin(): string
         $origin = $configured;
     } elseif ($https) {
         $origin = 'https://'.$authority;
-    } elseif (PANEL_DEV_ALLOW_LOCALHOST) {
+    } elseif (panelAllowsLocalhost()) {
         $origin = 'http://'.$authority;
     } else {
         panelFail(400, 'Open this panel through its configured HTTPS address.');
@@ -57,7 +65,7 @@ function panelOrigin(): string
     if (!str_starts_with($origin, $prefix) || substr($origin, strlen($prefix)) !== $authority) {
         panelFail(400, 'Open this panel through its configured HTTPS address.');
     }
-    if ($scheme === 'http' && (!PANEL_DEV_ALLOW_LOCALHOST || !panelIsLoopbackHost($host))) {
+    if ($scheme === 'http' && (!panelAllowsLocalhost() || !panelIsLoopbackHost($host))) {
         panelFail(400, 'Open this panel through its configured HTTPS address.');
     }
     if ($scheme === 'https' && !$https && $configured === false) {
