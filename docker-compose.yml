@@ -22,6 +22,9 @@ services:
       # Prefer a gitignored root `.env` / `.env.development.local` with VITE_ALLOW_LOCALHOST_ORIGINS=true.
       # Compose can also inject it for local Docker without committing the value:
       VITE_ALLOW_LOCALHOST_ORIGINS: "true"
+      # Same-origin Identity proxy in DEV (see vite.config.ts).
+      VITE_IDENTITY_API: "/fonitas-api/api/v1"
+      VITE_IDENTITY_PROXY_TARGET: "https://api.fonitas.com"
 
   customer:
     image: php:8.2-cli-bookworm

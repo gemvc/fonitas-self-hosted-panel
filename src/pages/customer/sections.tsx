@@ -1,5 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { resendEmailVerification, verificationCodePattern, verifyEmailByCode } from "../../identity-api";
+import {
+  IdentityApiError,
+  resendEmailVerification,
+  verificationCodePattern,
+  verifyEmailByCode,
+} from "../../identity-api";
 import type { messages } from "../../locale";
 import { updateLocalMe, type PanelMe } from "../../panel-me";
 import { ActionRow, ComingSoonNote, EmptyPanel, SectionFrame } from "./section-frame";
@@ -140,17 +145,31 @@ export function ProfileSection({
   const [verified, setVerified] = useState(Boolean(me.email_verified));
   const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<"verifyFailed" | "verifyInvalid" | "rateLimited" | "unavailable" | null>(null);
+  const [error, setError] = useState<
+    "verifyFailed" | "verifyInvalid" | "rateLimited" | "unavailable" | "missingEmail" | "validation" | null
+  >(null);
+
+  function mapIdentityError(cause: unknown): typeof error {
+    if (cause instanceof IdentityApiError) {
+      if (cause.message === "rate_limited") return "rateLimited";
+      if (cause.message === "validation") return "validation";
+    }
+    return "unavailable";
+  }
 
   async function sendCode() {
-    if (!email || busy || verified) return;
+    if (busy || verified) return;
+    if (!email) {
+      setError("missingEmail");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       await resendEmailVerification(email);
       setCodeSent(true);
     } catch (cause) {
-      setError(cause instanceof Error && cause.message === "rate_limited" ? "rateLimited" : "unavailable");
+      setError(mapIdentityError(cause));
     } finally {
       setBusy(false);
     }
@@ -158,7 +177,11 @@ export function ProfileSection({
 
   async function submitCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!email || busy || verified) return;
+    if (busy || verified) return;
+    if (!email) {
+      setError("missingEmail");
+      return;
+    }
     const code = String(new FormData(event.currentTarget).get("code") ?? "").trim();
     if (!verificationCodePattern.test(code)) {
       setError("verifyInvalid");
@@ -177,7 +200,7 @@ export function ProfileSection({
       onMeChange(next);
       event.currentTarget.reset();
     } catch (cause) {
-      setError(cause instanceof Error && cause.message === "rate_limited" ? "rateLimited" : "unavailable");
+      setError(mapIdentityError(cause));
     } finally {
       setBusy(false);
     }
