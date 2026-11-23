@@ -8,6 +8,7 @@ This handbook is the repository's reference for architecture, API discovery, dev
 | --- | --- | --- |
 | Change the static ZIP dashboard, pairing, or Fonitas sign-in | This repository, React and TypeScript | [index.html](../index.html), [main.tsx](../src/main.tsx), [panel-login.ts](../src/panel-login.ts) |
 | Change local workspace homes or Identity role mapping | This repository, React and TypeScript | [roles.ts](../src/roles.ts), [workspace.tsx](../src/workspace.tsx), [panel-me.ts](../src/panel-me.ts), [pages/](../src/pages/) |
+| Change the customer PHP API or installation validation | This repository, server-side PHP | [customer/public/index.php](../customer/public/index.php), [customer/src](../customer/src/) |
 | Change OEM branding or the application summary | This repository, HTML and TypeScript | [oem.html](../oem.html), [oem.ts](../src/oem.ts), shared [styles.css](../src/styles.css) |
 | Change OEM setup, configuration, access, or updates | This repository, server-side PHP | [installer/setup.php](../installer/setup.php), especially `panelAction`, `panelRuntime`, `panelLatestRelease`, and `panelStageRelease` |
 | Change the organization admin's domain workflow | Hosted developer portal | [Custom Domains page][hosted-domains] |
@@ -17,7 +18,7 @@ This handbook is the repository's reference for architecture, API discovery, dev
 
 ## Product direction for the OEM dashboard
 
-This section defines the target product. The customer and developer workflows below are planned. See [current purpose and architecture](#purpose-and-architecture) and [operations](#operations) for the software available today.
+The first release of the new customer dashboard is for signed-in buyers. It covers each customer's purchases and licenses for one registered application. Administration, support, invoicing, and reporting belong to later phases. The [customer-only PHP backend](#customer-only-php-backend) describes the implemented foundation. [Operations](#operations) covers the current static ZIP and OEM installer.
 
 ### Product and roles
 
@@ -35,7 +36,18 @@ Use **existing Symfony keys** only. Do not invent panel-only role names. Applica
 
 Fonitas supplies identity, purchasing and payments, licensing, invoices, support tickets, business email, and reporting. The self-hosted dashboard is the branded interface for those services. Gate actions with **permissions** from Identity; use roles only for coarse home selection. Symfony remains the authority for ownership, entitlement, and business records. See [local role workspaces](#local-role-workspaces-static-ui) for the static UI mapping.
 
-### Target installation and branding
+### First milestone: customer registration from the app site
+
+The app's own website starts registration. Fonitas creates and verifies the account on its hosted identity surface. A person who already has a Fonitas account signs in with it. When the authenticated flow completes, Fonitas resolves the application and its owning company from the registered installation, records the customer relationship, and returns the person to that application's registered HTTPS origin.
+
+- Record the relationship for the verified identity and the registered application once. A repeat sign-in or callback must reuse the same relationship.
+- Resolve the owning company from the application binding. A browser-supplied company or application identifier does not establish authorization.
+- The customer relationship identifies the buyer in the application. A purchase or license entitlement governs access to paid features.
+- This milestone is planned. The current customer PHP entry point checks installation readiness. [Customer PHP backend](#customer-only-php-backend)
+
+### Future installation and branding
+
+The customer backend initially uses private environment configuration and an existing installation credential. The hosted administrator onboarding below is a later improvement.
 
 1. The organization administrator opens `/setup.php` on the registered HTTPS origin and selects **Sign in with Fonitas**. The Fonitas sign-in page handles account credentials and any MFA. After authentication, a short-lived, one-time authorization code returns to the registered origin. The installer validates callback state and exchanges the code server-side.
 2. Symfony verifies that the actor can manage the organization and that the origin is bound to its registered application. The installer loads organization and application details from that binding. The installer flow needs a backend authorization step that works before the installation is connected. The existing organization-member sign-in flow requires an already connected installation. [Current session service][sessions]
@@ -48,6 +60,42 @@ Fonitas supplies identity, purchasing and payments, licensing, invoices, support
 - The hosted Fonitas sign-in flow supplies shared identity. Application-tenant access uses seeded roles `APP_OWNER`, `APP_ADMIN`, and `APP_END_USER`. Customer authorization for purchases derives from Fonitas purchase or license data. The same account can have different access across applications.
 - Keep application business state in Fonitas. The self-hosted site stores the installation state, branding, static assets, and the configuration needed to serve its own dashboard.
 - Treat the flows in this section as requirements for future API and frontend work. Verify the producer and consumer before documenting concrete routes, request fields, or compatibility guarantees. The [current API contracts](#api-contracts) describe the existing routes only.
+
+### Customer-only PHP backend
+
+The merged PHP foundation exposes one readiness route. It is available in the source checkout. The published static and OEM ZIPs and `setup.php` package the existing dashboards.
+
+#### Configure and check an installation
+
+1. Use PHP 8.2 or later with cURL. On a test virtual host, set the document root to `customer/public` and route `/api/health` to [`customer/public/index.php`](../customer/public/index.php).
+2. Create `customer/.env` from [`customer/.env.example`](../customer/.env.example). Keep it outside the document root, readable by the PHP worker, with mode `0600`.
+
+| Key | Value |
+| --- | --- |
+| `APP_ID` | The public UUID of the application bound to this installation |
+| `PANEL_ORIGIN` | The exact registered HTTPS origin, including a non-default port if applicable. Omit the trailing slash and the default port `443`. |
+| `DOMAIN_TOKEN` | The OEM installation credential issued by activation. It starts with `fpi_`. The activation form uses a separate one-time key starting with `fpk_`. An activated OEM install stores the credential in its private state file. |
+
+3. Run the following commands from the repository root in separate terminals to check the local PHP route.
+
+```sh
+php -S 127.0.0.1:8080 -t customer/public customer/public/index.php
+```
+
+```sh
+curl -i http://127.0.0.1:8080/api/health
+```
+
+The API check uses `PANEL_ORIGIN` from configuration. The local command binds to loopback and leaves the actual registered origin unchanged.
+
+| Response | Meaning |
+| --- | --- |
+| `200` with `{"status":"ready"}` | Fonitas accepted the installation credential and returned the configured application. |
+| `503` with `installation_binding_invalid` | Fonitas rejected the installation or returned a different application UUID. Compare the origin, token, and app binding. |
+| `503` with `installation_unavailable` | Check the configuration, file permissions, cURL, and outbound HTTPS to `api.fonitas.com`. An unexpected Fonitas response also produces this status. |
+| `404` or `405` | The route only handles `GET /api/health`. A different request method to that path receives `405`. |
+
+The readiness route returns no application details, buyer data, or credential. A successful result verifies the installation-to-app binding. Customer sign-in and app-scoped purchase and license routes remain to be implemented. [PHP configuration loader](../customer/src/Installation.php) · [PHP client](../customer/src/FonitasApi.php) · [OEM service][oem-service]
 
 ## Purpose and architecture
 
@@ -182,6 +230,17 @@ php -l installer/setup.php
 
 ## Operations
 
+### Temporary automatic deployment to Infrasible
+
+[Deploy Infrasible dashboard test](../.github/workflows/deploy-infrasible-test.yml) uploads the customer PHP readiness service via FTPS after a push to `main`. It uses a separate GitHub environment and upload state from the Infrasible website. It is disabled until the repository variable `INFRASIBLE_TEST_DEPLOY_ENABLED` is `true`.
+
+1. Create a dedicated FTPS account whose home is the dashboard test application directory. Use a fresh directory outside other public web roots and keep the previous dashboard document root for rollback. The workflow uploads relative to the account's home.
+2. On the host, put the private `.env` in that application directory using the [customer configuration](#customer-only-php-backend). Configure the dashboard virtual host's document root as the directory's `public/` subdirectory. The checked-in Apache rewrite sends `/api/health` to `index.php`. Use PHP 8.2 or later with cURL and enable Apache-compatible rewrite support for that directory.
+3. In the repository, create the `infrasible-dashboard-test` environment and add `DASHBOARD_FTPS_SERVER`, `DASHBOARD_FTPS_USERNAME`, and `DASHBOARD_FTPS_PASSWORD` as environment secrets. Use the provider's hostname that matches the FTPS certificate. Set the repository variable to `true`. Open **Actions → Deploy Infrasible dashboard test** and run it from `main` with **dry_run** before the first upload.
+4. Run the workflow without **dry_run**. It verifies `https://dashboard.infrasible.com/api/health`. This deployment currently serves only the readiness endpoint. Switching the document root makes the previous dashboard page unavailable on that domain until you restore its root or deploy the customer frontend.
+
+The upload contains the three PHP files and the public rewrite configuration. Keep `.env` on the host. To stop automatic deployments after the test, set `INFRASIBLE_TEST_DEPLOY_ENABLED` to `false` or remove it. To revert the site, separately restore its previous document root.
+
 ### Install the static ZIP
 
 1. Download and extract the [static ZIP][static-zip]. Put `index.html` and `assets/` directly at the root of the HTTPS domain.
@@ -221,7 +280,7 @@ For the viewer `403`, check that the host authenticates the dashboard request an
 
 The last reported check on `dashboard.infrasible.com` showed the PHP viewer guard's `403` after `v0.3.5` was published. The host's authenticated identity and successful dashboard access have not been confirmed.
 
-The next implementation is the Fonitas account flow in [Product direction](#product-direction-for-the-oem-dashboard). Add hosted authorization for the first installation and customer sessions for the bound application. Before switching viewer access, verify that an entitled customer can sign in and a customer without an entitlement to that application cannot access its protected data. The current organization-member sign-in route requires an already connected installation. [Current session service][sessions]
+Continue from the [customer PHP foundation](#customer-only-php-backend). Start with [customer registration from the app site](#first-milestone-customer-registration-from-the-app-site). Then add the Symfony contract that checks both the signed-in buyer and the application bound to the installation. Then wire the PHP routes and build the customer frontend. Verify that an entitled buyer can sign in and see their purchases and licenses, and that other buyers and applications stay isolated. The existing organization-member sign-in is for the developer dashboard. The existing buyer-purchase route authenticates the buyer but does not apply the OEM installation's app binding. [Organization session service][sessions] · [Buyer purchases API](https://github.com/gemvc/symfony_fonitas/blob/main/src/License/Presentation/Http/Rest/BuyerPurchasesController.php)
 
 ## Releases
 

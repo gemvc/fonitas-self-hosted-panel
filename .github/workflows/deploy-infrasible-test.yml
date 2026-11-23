@@ -1,0 +1,62 @@
+name: Deploy Infrasible dashboard test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Preview uploads without changing the host
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infrasible-dashboard-test
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main' && vars.INFRASIBLE_TEST_DEPLOY_ENABLED == 'true'
+    environment: infrasible-dashboard-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - name: Prepare the customer backend
+        run: |
+          mkdir -p dashboard-test/public dashboard-test/src
+          install -m 0644 customer/public/index.php customer/public/.htaccess dashboard-test/public/
+          install -m 0644 customer/src/Installation.php customer/src/FonitasApi.php dashboard-test/src/
+          find dashboard-test -name '*.php' -print0 | xargs -0 -n 1 php -l
+      - name: Upload to the dedicated dashboard test directory
+        uses: SamKirkland/FTP-Deploy-Action@110f9186c050f71550953127052e77650219c287 # v4.4.0
+        with:
+          server: ${{ secrets.DASHBOARD_FTPS_SERVER }}
+          username: ${{ secrets.DASHBOARD_FTPS_USERNAME }}
+          password: ${{ secrets.DASHBOARD_FTPS_PASSWORD }}
+          port: 21
+          protocol: ftps
+          security: strict
+          local-dir: ./dashboard-test/
+          server-dir: /
+          state-name: .infrasible-dashboard-test-deploy.json
+          dangerous-clean-slate: false
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          log-level: minimal
+      - name: Verify dashboard readiness
+        shell: bash
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        run: |
+          curl --fail --silent --show-error --max-time 15 \
+            https://dashboard.infrasible.com/api/health |
+            jq -e '. == {"status":"ready"}'
