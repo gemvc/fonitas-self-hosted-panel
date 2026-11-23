@@ -6,8 +6,8 @@ This handbook is the repository's reference for architecture, API discovery, dev
 
 | Task | Owning component | Entry point |
 | --- | --- | --- |
-| Change the static ZIP dashboard, pairing, or Fonitas sign-in | This repository, React and TypeScript | [index.html](../index.html), [main.tsx](../src/main.tsx), [panel-login.ts](../src/panel-login.ts) |
-| Change the customer workspace or Identity role gate | This repository, React and TypeScript | [roles.ts](../src/roles.ts), [workspace.tsx](../src/workspace.tsx), [panel-me.ts](../src/panel-me.ts), [customer-home.tsx](../src/pages/customer-home.tsx) |
+| Change the static ZIP dashboard, pairing, or on-origin customer auth UI | This repository, React and TypeScript | [index.html](../index.html), [main.tsx](../src/main.tsx), [customer-session.ts](../src/customer-session.ts), [panel-login.ts](../src/panel-login.ts) |
+| Change the customer dashboard sections or Identity role gate | This repository, React and TypeScript | [roles.ts](../src/roles.ts), [workspace.tsx](../src/workspace.tsx), [customer-dashboard.tsx](../src/pages/customer-dashboard.tsx), [customer-nav.ts](../src/customer-nav.ts) |
 | Change the customer PHP API or installation validation | This repository, server-side PHP | [customer/public/index.php](../customer/public/index.php), [customer/src](../customer/src/) |
 | Change allowed installation origins (HTTPS domain / localhost policy) | This repository, and Symfony origin validation | [origin.ts](../src/origin.ts), [installer `panelOrigin`](../installer/setup.php), Symfony [`DeveloperPanelOriginPolicy`][panels] |
 | Change local Docker development images | This repository | [Dockerfile](../Dockerfile), [docker-compose.yml](../docker-compose.yml) |
@@ -20,22 +20,22 @@ This handbook is the repository's reference for architecture, API discovery, dev
 
 ## Product direction for the OEM dashboard
 
-The first release of the new customer dashboard is for signed-in buyers. It covers each customer's purchases and licenses for one registered application. Administration, support, invoicing, and reporting belong to later phases. The [customer-only PHP backend](#customer-only-php-backend) describes the implemented foundation. [Operations](#operations) covers the current static ZIP and OEM installer.
+The customer dashboard is installed on a subdomain (or site) of software a developer publishes on Fonitas. It is the branded account area for that application’s buyers only. Symfony remains the authority for purchases, licenses, subscriptions, payments, tickets, and email. This repository ships the on-origin UI shell; customer PHP and verified Fonitas routes fill the data. Deep organization administration stays on the hosted Fonitas portal. [Customer-only PHP backend](#customer-only-php-backend) · [Operations](#operations)
 
 ### Product and roles
 
-Fonitas is a software publishing platform. The developer operates a branded dashboard on their site or subdomain for one registered software application. **This dashboard’s primary audience is the application customer** (`APP_END_USER`): purchases, license term and type, upgrades, and related buyer views. Deep administration, organization tools, and staff desks stay on the hosted Fonitas portal unless a later product decision reopens local staff homes.
+Fonitas is a software publishing platform. The developer publishes an application on Fonitas and installs this dashboard on their own subdomain for that application. **The audience is the application customer** (`APP_END_USER`). The shell uses a top navbar (language plus a profile avatar menu with Profile, Send ticket, and Sign out) and a sidebar: overview, buy now, licenses (with devices), subscriptions, billing (purchases and payment history), support tickets, and profile. Profile holds account details, change password, payment methods, email, and sign out.
 
 Use **existing Symfony keys** only. Do not invent panel-only role names. Application-tenant roles are seeded by Identity [`TenantRoleProvisioner`][tenant-roles].
 
 | Actor | Existing backend key | Local dashboard | Hosted Fonitas |
 | --- | --- | --- | --- |
-| End user / buyer | `APP_END_USER` | Customer home (primary product) | — |
+| End user / buyer | `APP_END_USER` | Full customer dashboard (primary product) | — |
 | Organization administrator | `ORG_ADMIN` | Install / pair only | Domain binding, connection keys, deep admin |
 | Application owner / admin | `APP_OWNER`, `APP_ADMIN` | Not the primary local audience | Deep administration |
 | Support agent | `support.ticket.assign` | Optional later; not required for customer-first scope | Support tools as provided on Fonitas |
 
-Fonitas supplies identity, purchasing and payments, licensing, invoices, support tickets, and reporting. Symfony remains the authority for ownership, entitlement, and business records. See [local role workspaces](#local-role-workspaces-static-ui) and [installation detection](#installation-detection-api-key-and-domain).
+Fonitas supplies identity, purchasing and payments, licensing, invoices, support tickets, business email, and reporting. Symfony remains the authority for ownership, entitlement, and business records. See [local customer workspace](#local-customer-workspace-static-ui) and [installation detection](#installation-detection-api-key-and-domain).
 
 ### Installation detection (API key and domain)
 
@@ -59,7 +59,7 @@ Verify Symfony is deployed with the dual-gate policy before relying on localhost
 
 ### First milestone: customer registration from the app site
 
-The app's own website starts registration. Fonitas creates and verifies the account on its hosted identity surface. A person who already has a Fonitas account signs in with it. When the authenticated flow completes, Fonitas resolves the application and its owning company from the registered installation, records the customer relationship, and returns the person to that application's registered HTTPS origin.
+The app's own website (this OEM panel) hosts login and registration forms. The buyer never leaves that origin for another Fonitas website. Same-origin customer PHP will call Fonitas Identity to create or verify the account. A person who already has a Fonitas account signs in with it on this site. When authentication succeeds, Fonitas resolves the application and its owning company from the registered installation and records the customer relationship.
 
 - Record the relationship for the verified identity and the registered application once. A repeat sign-in or callback must reuse the same relationship.
 - Resolve the owning company from the application binding. A browser-supplied company or application identifier does not establish authorization.
@@ -136,9 +136,11 @@ The current releases give software developers and authorized viewers a read-only
 
 ### Local customer workspace (static UI)
 
-The static React client ships a **customer-only** home for `APP_END_USER` ([`roles.ts`](../src/roles.ts), [`workspace.tsx`](../src/workspace.tsx), [`pages/customer-home.tsx`](../src/pages/customer-home.tsx)). Accounts without that role see a no-access message. Admin and support homes are out of scope for this package; they stay on hosted Fonitas.
+The static React client’s first page is **on-origin customer login and register** ([`main.tsx`](../src/main.tsx)). After sign-in, `APP_END_USER` opens the **customer dashboard** ([`customer-dashboard.tsx`](../src/pages/customer-dashboard.tsx), [`customer-nav.ts`](../src/customer-nav.ts)) with navbar sign-out and a sidebar. Profile consolidates account, password, payment methods, and email. There is **no browser redirect** to the hosted developer portal for buyers. Accounts without `APP_END_USER` see a no-access message.
 
-Identity `GET /api/v1/auth/me` returns `display_name`, `roles`, and `permissions`. Prefer **permissions** for action gates when those APIs ship. The developer-panel bearer session does not expose this identity yet; the client’s `/session/me` loader is an unverified bridge.
+The current forms create a **local OEM session** ([`customer-session.ts`](../src/customer-session.ts)) so the dashboard shell can be exercised on the branded site. Section actions that need Fonitas data stay empty or disabled until same-origin customer PHP and verified routes exist. The [customer registration milestone](#first-milestone-customer-registration-from-the-app-site) remains planned. Installation pairing is not on the customer landing; open `?setup=1` for the connection-key form.
+
+Identity `GET /api/v1/auth/me` returns `display_name`, `roles`, and `permissions`. Prefer **permissions** for action gates when those APIs ship.
 
 ### Origin policy (domain and localhost)
 
@@ -154,16 +156,16 @@ The static UI uses [`isAllowedPanelOrigin`](../src/origin.ts) before pairing and
 | Order | Work | Owner |
 | --- | --- | --- |
 | 1 | Deploy / verify Symfony fail-closed localhost origin policy with the self-hosted client | `symfony_fonitas` + this repo |
-| 2 | Verified buyer identity on the panel session (`APP_END_USER` from a real contract, not only `/session/me` bridge) | Symfony + static client |
-| 3 | Customer purchase / license / upgrade API consumers against verified License routes | This repo + Symfony License |
+| 2 | Same-origin buyer login/register via customer PHP against verified Identity (replace local OEM session) | Symfony + customer PHP + static client |
+| 3 | Customer dashboard API consumers: purchases, licenses, devices, subscriptions, payments, methods, tickets, email | This repo + Symfony (License, payments, support, mail) |
 | 4 | Application API key contract for software detection (keep domain connection key) | Symfony first, then this repo |
 
 ### Static trust flow
 
 1. A hosted organization admin submits the panel's HTTPS address. The stored origin includes the host and any non-default port, and the static callback uses the site root. Registration makes a single-use connection key available immediately. The key is valid for 15 minutes. The installation is stored in Symfony and survives frontend replacement. [Installation lifecycle][panels]
-2. The static UI submits the key to the pairing endpoint. The browser supplies its origin. Pairing acknowledges a connected installation, while user sign-in remains a separate step. [Static pairing UI](../src/main.tsx)
-3. The browser generates a state and a verifier, stores them in tab session storage, and sends the hex SHA-256 challenge to the hosted consent page. After consent, Symfony returns a URL on the registered origin with the one-time code and state in the fragment. The static client clears the fragment, validates state, and exchanges the code with the verifier. The code lasts 60 seconds. The panel bearer lasts 900 seconds and stays in memory. [Static sign-in client](../src/panel-login.ts) · [Session service][sessions]
-4. Data access is scoped by the bearer, request origin, active installation, active Fonitas Identity session, and active organization membership. Signing out revokes the panel bearer and leaves the hosted Fonitas session available for a later sign-in. [Session service][sessions] · [Static UI](../src/main.tsx)
+2. An organization administrator opens the panel with `?setup=1` and submits the key to the pairing endpoint. The browser supplies its origin. Pairing acknowledges a connected installation, while customer sign-in remains a separate step. [Static pairing UI](../src/main.tsx)
+3. On the customer landing, Sign in and Register stay on this origin. The UI currently opens a local customer session for the branded shell. When the [customer registration milestone](#first-milestone-customer-registration-from-the-app-site) ships, the same forms will post to same-origin customer PHP, which will call Fonitas Identity without sending the buyer to another website. [Static UI](../src/main.tsx) · [Customer session](../src/customer-session.ts)
+4. Customer data access must be scoped by the signed-in buyer, the installation origin, and the bound application. [Session service][sessions] · [Static UI](../src/main.tsx)
 
 ### OEM trust flow
 
@@ -267,7 +269,7 @@ Files: [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.y
 
 | Change | Verify |
 | --- | --- |
-| Static UI or authentication | Build the static output, or use `npm run docker:dev` / `docker:preview`. Smoke-test pairing on an HTTPS domain and, with `VITE_ALLOW_LOCALHOST_ORIGINS=true` in a gitignored Vite env file, on `http://localhost:5173`. Confirm only `APP_END_USER` opens the customer home |
+| Static UI or authentication | Build the static output, or use `npm run docker:dev` / `docker:preview`. Confirm the customer landing keeps login/register on-origin (no hosted redirect). Smoke-test pairing at `?setup=1` when needed. Confirm only `APP_END_USER` opens the customer home |
 | Identity role mapping | Confirm `APP_END_USER` against [TenantRoleProvisioner][tenant-roles] and [RBAC][identity-rbac]. Do not add panel-only role names |
 | Origin / API-key detection | Keep domain connection-key flow. Document any new application API-key contract against Symfony before coding consumers. Cover allowed loopback and rejected non-local HTTP in Symfony origin tests |
 | OEM runtime or branding | Build the OEM output. Use a signed test release and a PHP site with trusted viewer identity. Verify an allowed viewer and an unlisted viewer, same-origin requests, and the intended display fields |
@@ -294,7 +296,7 @@ The upload contains the three PHP files and the public rewrite configuration. Ke
 
 1. Download and extract the [static ZIP][static-zip]. Put `index.html` and `assets/` directly at the root of the HTTPS domain.
 2. In [Custom Domains][custom-domains], select the organization and submit the panel's HTTPS address. Select **Show connection key** and copy it.
-3. Paste the key into **Connect to Fonitas** on the custom domain. Select **Sign in with Fonitas**, sign in, and confirm the organization.
+3. Open the custom domain with `?setup=1` and paste the key into **Connect to Fonitas**. Return to the customer landing and use the on-page **Sign in** or **Register** forms (no hosted redirect).
 4. For updates, replace the build in the same document root. The existing domain connection is held in Symfony.
 
 ### Install the PHP OEM dashboard

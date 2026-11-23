@@ -1,9 +1,10 @@
+import { isLocalCustomerToken } from "./customer-session";
 import { panelRequest } from "./panel-login";
 
 /**
  * Application identity after sign-in.
  * Shape matches Identity `GET /api/v1/auth/me` (`display_name`, `roles`, `permissions`).
- * Developer-panel bearer session does not expose this yet — wiring is unverified.
+ * Local OEM sessions supply identity in-memory. Developer-panel bearer `/session/me` is unverified.
  */
 export type PanelMe = {
   display_name: string;
@@ -11,19 +12,23 @@ export type PanelMe = {
   permissions: string[];
 };
 
-const previewKey = "fonitas-panel-preview-me";
+const localMeKey = "fonitas-local-customer-me";
 
-/** Development-only identity so role homes can be reviewed before `/session/me` exists. */
-export function setPreviewMe(me: PanelMe | null): void {
-  if (!import.meta.env.DEV) return;
-  if (me) sessionStorage.setItem(previewKey, JSON.stringify(me));
-  else sessionStorage.removeItem(previewKey);
+export function rememberLocalMe(me: PanelMe): void {
+  sessionStorage.setItem(localMeKey, JSON.stringify(me));
+}
+
+export function clearLocalMe(): void {
+  sessionStorage.removeItem(localMeKey);
 }
 
 export async function loadPanelMe(token: string): Promise<PanelMe> {
-  if (import.meta.env.DEV) {
-    const preview = sessionStorage.getItem(previewKey);
-    if (preview) return JSON.parse(preview) as PanelMe;
+  if (isLocalCustomerToken(token)) {
+    const saved = sessionStorage.getItem(localMeKey);
+    if (!saved) throw new SessionEndedError();
+    const me = JSON.parse(saved) as PanelMe;
+    if (!Array.isArray(me.roles) || typeof me.display_name !== "string") throw new SessionEndedError();
+    return me;
   }
 
   const response = await panelRequest("/session/me", {

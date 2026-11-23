@@ -1,21 +1,21 @@
 import { StrictMode, useCallback, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
+import { createLocalCustomerSession, isLocalCustomerToken } from "./customer-session";
 import { messages, type Language } from "./locale";
-import { completePanelSignIn, panelRequest, startPanelSignIn, type PanelSession } from "./panel-login";
+import { clearLocalMe, rememberLocalMe } from "./panel-me";
+import { panelRequest, type PanelSession } from "./panel-login";
 import { isAllowedPanelOrigin } from "./origin";
-import { setPreviewMe } from "./panel-me";
-import { CUSTOMER_ROLE } from "./roles";
 import { Workspace } from "./workspace";
 import "./styles.css";
 
 const hostedSettings = "https://developerpannel.fonitas.com/settings/custom-domains";
 const allowedOrigin = isAllowedPanelOrigin();
-let pendingSession = completePanelSignIn();
-void pendingSession?.catch(() => {});
+const setupPairing = new URLSearchParams(window.location.search).get("setup") === "1";
 
 type Text = typeof messages.en;
+type AuthMode = "sign-in" | "register";
 type PairingError = "invalidKey" | "rejectedKey" | "unavailable";
-type SignOutState = { status: "pending" | "failed"; token: string } | { status: "done" };
+type AuthError = "authFailed" | "passwordMismatch" | "unavailable";
 
 function defaultLanguage(): Language {
   const preferred = localStorage.getItem("fonitas-panel-language") ?? navigator.language.split("-")[0];
@@ -25,12 +25,12 @@ function defaultLanguage(): Language {
 function Panel() {
   const [language, setLanguage] = useState(defaultLanguage);
   const [session, setSession] = useState<PanelSession | null>(null);
-  const [checking, setChecking] = useState(pendingSession !== null);
-  const [signingIn, setSigningIn] = useState(false);
-  const [signInFailed, setSignInFailed] = useState(false);
-  const [signOutState, setSignOutState] = useState<SignOutState>();
+  const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
+  const [busy, setBusy] = useState(false);
+  const [authError, setAuthError] = useState<AuthError | null>(null);
+  const [signedOut, setSignedOut] = useState(false);
   const endSession = useCallback(() => {
-    setPreviewMe(null);
+    clearLocalMe();
     setSession(null);
   }, []);
   const t = messages[language];
@@ -42,61 +42,55 @@ function Panel() {
   }, [language]);
 
   useEffect(() => {
-    if (!pendingSession) return;
-    let active = true;
-    pendingSession.then(value => { if (active) setSession(value); }, () => {
-      if (active) setSignInFailed(true);
-    }).finally(() => {
-      if (active) {
-        pendingSession = null;
-        setChecking(false);
-      }
-    });
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
     if (!session) return;
     const timeout = window.setTimeout(endSession, session.expires_in * 1000);
     return () => window.clearTimeout(timeout);
   }, [session, endSession]);
 
-  function signIn() {
-    setSigningIn(true);
-    setSignInFailed(false);
-    void startPanelSignIn().catch(() => { setSigningIn(false); setSignInFailed(true); });
-  }
+  function submitAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const form = new FormData(event.currentTarget);
+    const email = String(form.get("email") ?? "").trim();
+    const password = String(form.get("password") ?? "");
+    const name = String(form.get("name") ?? "").trim();
+    const confirm = String(form.get("confirm") ?? "");
 
-  async function signOut(token: string) {
-    const preview = import.meta.env.DEV && token === "preview";
-    endSession();
-    if (preview) {
-      setSignOutState({ status: "done" });
+    if (!email || !password) {
+      setAuthError("authFailed");
       return;
     }
-    setSignOutState({ status: "pending", token });
+    if (authMode === "register" && password !== confirm) {
+      setAuthError("passwordMismatch");
+      return;
+    }
+
+    setAuthError(null);
+    setBusy(true);
+    setSignedOut(false);
     try {
-      const response = await panelRequest("/session", {
-        method: "DELETE",
-        headers: { Authorization: "Bearer " + token },
-        keepalive: true,
-      });
-      if (response.status !== 204) throw new Error("Session revocation was not confirmed");
-      setSignOutState({ status: "done" });
+      // Same-origin OEM UI only for now. Fonitas credential verification via customer PHP is planned.
+      const displayName = authMode === "register" && name ? name : email.split("@")[0] || email;
+      const next = createLocalCustomerSession(displayName);
+      rememberLocalMe(next.me);
+      setSession({ access_token: next.access_token, expires_in: next.expires_in });
+      event.currentTarget.reset();
     } catch {
-      setSignOutState({ status: "failed", token });
+      setAuthError("unavailable");
+    } finally {
+      setBusy(false);
     }
   }
 
-  function previewCustomer() {
-    setSignInFailed(false);
-    setSignOutState(undefined);
-    setPreviewMe({
-      display_name: "Preview customer",
-      roles: [CUSTOMER_ROLE],
-      permissions: [],
-    });
-    setSession({ access_token: "preview", expires_in: 3_600 });
+  function signOut(token: string) {
+    endSession();
+    setSignedOut(true);
+    if (isLocalCustomerToken(token)) return;
+    void panelRequest("/session", {
+      method: "DELETE",
+      headers: { Authorization: "Bearer " + token },
+      keepalive: true,
+    }).catch(() => {});
   }
 
   const languageMenu = (
@@ -108,33 +102,52 @@ function Panel() {
     </select>
   );
 
-  if (checking) return <main className="setup" role="status">{t.loading}</main>;
   if (session) return <Workspace token={session.access_token} endSession={endSession} t={t} menu={languageMenu}
-    onSignOut={() => void signOut(session.access_token)} />;
+    onSignOut={() => signOut(session.access_token)} />;
 
   return (
     <main className="setup">
       <section className="card">
         <header className="bar"><strong>Fonitas</strong>{languageMenu}</header>
-        {signOutState?.status === "pending" && <p role="status">{t.signingOut}</p>}
-        {signOutState?.status === "done" && <div role="status">
-          <p>{t.signedOut}</p>
-          <p className="muted">{t.fonitasSession}</p>
-        </div>}
-        {signOutState?.status === "failed" && <div>
-          <p role="alert" className="error">{t.signOutFailed}</p>
-          <button type="button" onClick={() => void signOut(signOutState.token)}>{t.retrySignOut}</button>
-        </div>}
-        {allowedOrigin && <button className="primary full" type="button" onClick={signIn}
-          disabled={signingIn || signOutState?.status === "pending"}>{t.signIn}</button>}
-        {signInFailed && <p role="alert" className="error">{t.signInFailed}</p>}
-        <Pairing t={t} />
-        {import.meta.env.DEV && (
-          <section className="preview-roles">
-            <p className="muted">{t.previewRoles}</p>
-            <div className="actions">
-              <button type="button" onClick={previewCustomer}>{t.roleCustomer}</button>
+        {signedOut && <p role="status">{t.signedOut}</p>}
+
+        {setupPairing ? (
+          <Pairing t={t} />
+        ) : (
+          <section className="auth">
+            <h1>{t.welcomeTitle}</h1>
+            <p className="muted">{t.welcomeIntro}</p>
+            <div className="auth-tabs" role="tablist" aria-label={t.welcomeTitle}>
+              <button type="button" role="tab" aria-selected={authMode === "sign-in"}
+                className={authMode === "sign-in" ? "primary" : undefined}
+                onClick={() => { setAuthMode("sign-in"); setAuthError(null); }}>{t.signIn}</button>
+              <button type="button" role="tab" aria-selected={authMode === "register"}
+                className={authMode === "register" ? "primary" : undefined}
+                onClick={() => { setAuthMode("register"); setAuthError(null); }}>{t.register}</button>
             </div>
+            <form onSubmit={submitAuth}>
+              {authMode === "register" && (
+                <label>{t.name}
+                  <input name="name" type="text" autoComplete="name" required disabled={busy} />
+                </label>
+              )}
+              <label>{t.email}
+                <input name="email" type="email" dir="ltr" autoComplete="email" required disabled={busy} />
+              </label>
+              <label>{t.password}
+                <input name="password" type="password" autoComplete={authMode === "register" ? "new-password" : "current-password"}
+                  required minLength={8} disabled={busy} />
+              </label>
+              {authMode === "register" && (
+                <label>{t.confirmPassword}
+                  <input name="confirm" type="password" autoComplete="new-password" required minLength={8} disabled={busy} />
+                </label>
+              )}
+              {authError && <p role="alert" className="error">{t[authError]}</p>}
+              <button className="primary full" disabled={busy}>
+                {busy ? t.loading : authMode === "register" ? t.register : t.signIn}
+              </button>
+            </form>
           </section>
         )}
       </section>
