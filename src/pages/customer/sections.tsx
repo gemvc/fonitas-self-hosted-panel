@@ -6,7 +6,13 @@ import {
   verifyEmailByCode,
 } from "../../identity-api";
 import type { messages } from "../../locale";
-import { updateLocalMe, type PanelMe } from "../../panel-me";
+import {
+  clearVerificationEmailPending,
+  isVerificationEmailPending,
+  markVerificationEmailPending,
+  updateLocalMe,
+  type PanelMe,
+} from "../../panel-me";
 import { ActionRow, ComingSoonNote, EmptyPanel, SectionFrame } from "./section-frame";
 
 type Text = typeof messages.en;
@@ -143,7 +149,7 @@ export function ProfileSection({
 }) {
   const email = me.email ?? "";
   const [verified, setVerified] = useState(Boolean(me.email_verified));
-  const [codeSent, setCodeSent] = useState(false);
+  const [codeSent, setCodeSent] = useState(() => isVerificationEmailPending());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<
     "verifyFailed" | "verifyInvalid" | "rateLimited" | "unavailable" | "missingEmail" | "validation" | null
@@ -168,6 +174,7 @@ export function ProfileSection({
     try {
       await resendEmailVerification(email);
       setCodeSent(true);
+      markVerificationEmailPending();
     } catch (cause) {
       setError(mapIdentityError(cause));
     } finally {
@@ -196,6 +203,7 @@ export function ProfileSection({
         return;
       }
       setVerified(true);
+      clearVerificationEmailPending();
       const next = updateLocalMe({ email_verified: true }) ?? { ...me, email_verified: true };
       onMeChange(next);
       event.currentTarget.reset();
@@ -243,32 +251,33 @@ export function ProfileSection({
         ) : (
           <>
             <p className="muted">{t.verifyEmailIntro}</p>
+            {codeSent && (
+              <p role="status">{t.verificationEmailSent}</p>
+            )}
             <ActionRow>
-              <button type="button" className="primary" onClick={() => void sendCode()} disabled={!email || busy}>
-                {busy && !codeSent ? t.loading : t.verifyEmail}
+              <button type="button" onClick={() => void sendCode()} disabled={!email || busy}>
+                {busy && !codeSent ? t.loading : codeSent ? t.resendVerificationCode : t.sendVerificationCode}
               </button>
             </ActionRow>
-            {codeSent && (
-              <form className="profile-form" onSubmit={event => void submitCode(event)}>
-                <label>{t.verificationCode}
-                  <input
-                    name="code"
-                    type="text"
-                    inputMode="text"
-                    autoComplete="one-time-code"
-                    spellCheck={false}
-                    maxLength={8}
-                    minLength={8}
-                    pattern="(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9]{8}"
-                    dir="ltr"
-                    required
-                    disabled={busy}
-                  />
-                </label>
-                <p className="muted">{t.verificationCodeHint}</p>
-                <button type="submit" className="primary" disabled={busy}>{t.submitVerificationCode}</button>
-              </form>
-            )}
+            <form className="profile-form" onSubmit={event => void submitCode(event)}>
+              <label>{t.verificationCode}
+                <input
+                  name="code"
+                  type="text"
+                  inputMode="text"
+                  autoComplete="one-time-code"
+                  spellCheck={false}
+                  maxLength={8}
+                  minLength={8}
+                  pattern="(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9]{8}"
+                  dir="ltr"
+                  required
+                  disabled={busy}
+                />
+              </label>
+              <p className="muted">{t.verificationCodeHint}</p>
+              <button type="submit" className="primary" disabled={!email || busy}>{t.submitVerificationCode}</button>
+            </form>
             {error && <p role="alert" className="error">{t[error]}</p>}
           </>
         )}

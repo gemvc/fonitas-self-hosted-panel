@@ -15,6 +15,8 @@ export type PanelMe = {
 };
 
 const localMeKey = "fonitas-local-customer-me";
+/** Set after register so Profile can collect the Identity verification code. */
+const verifyEmailPendingKey = "fonitas-verify-email-pending";
 
 export function rememberLocalMe(me: PanelMe): void {
   sessionStorage.setItem(localMeKey, JSON.stringify(me));
@@ -22,6 +24,20 @@ export function rememberLocalMe(me: PanelMe): void {
 
 export function clearLocalMe(): void {
   sessionStorage.removeItem(localMeKey);
+  clearVerificationEmailPending();
+}
+
+/** Register already dispatched the verification email — open Profile code entry. */
+export function markVerificationEmailPending(): void {
+  sessionStorage.setItem(verifyEmailPendingKey, "1");
+}
+
+export function clearVerificationEmailPending(): void {
+  sessionStorage.removeItem(verifyEmailPendingKey);
+}
+
+export function isVerificationEmailPending(): boolean {
+  return sessionStorage.getItem(verifyEmailPendingKey) === "1";
 }
 
 export function updateLocalMe(patch: Partial<PanelMe>): PanelMe | null {

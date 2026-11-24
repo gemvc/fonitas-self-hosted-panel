@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { createLocalCustomerSession, isLocalCustomerToken } from "./customer-session";
 import { IdentityApiError, registerIdentityUser } from "./identity-api";
 import { messages, type Language } from "./locale";
-import { clearLocalMe, rememberLocalMe } from "./panel-me";
+import { clearLocalMe, markVerificationEmailPending, rememberLocalMe } from "./panel-me";
 import { panelRequest, type PanelSession } from "./panel-login";
 import { isAllowedPanelOrigin } from "./origin";
 import { Workspace } from "./workspace";
@@ -22,7 +22,8 @@ type AuthError =
   | "unavailable"
   | "emailTaken"
   | "registerFailed"
-  | "registerInvalid";
+  | "registerInvalid"
+  | "tenantUnavailable";
 
 function defaultLanguage(): Language {
   const preferred = localStorage.getItem("fonitas-panel-language") ?? navigator.language.split("-")[0];
@@ -82,6 +83,7 @@ function Panel() {
         // Creates the Identity user and dispatches the verification email on Fonitas.
         const registered = await registerIdentityUser({ displayName, email, password });
         verified = registered.email_verified;
+        if (!verified) markVerificationEmailPending();
       }
       const next = createLocalCustomerSession(displayName, email);
       if (verified) next.me.email_verified = true;
@@ -93,6 +95,7 @@ function Panel() {
         if (cause.message === "email_taken") setAuthError("emailTaken");
         else if (cause.message === "validation") setAuthError("registerInvalid");
         else if (cause.message === "register_failed") setAuthError("registerFailed");
+        else if (cause.message === "tenant_unavailable") setAuthError("tenantUnavailable");
         else setAuthError("unavailable");
       } else {
         setAuthError("unavailable");

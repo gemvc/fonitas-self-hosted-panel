@@ -1,7 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { CustomerSection } from "./customer-nav";
 import type { messages } from "./locale";
-import { loadPanelMe, rememberLocalMe, SessionEndedError, type PanelMe } from "./panel-me";
+import {
+  isVerificationEmailPending,
+  loadPanelMe,
+  rememberLocalMe,
+  SessionEndedError,
+  type PanelMe,
+} from "./panel-me";
 import { CustomerDashboard } from "./pages/customer-dashboard";
 import { ProfileMenu } from "./profile-menu";
 import { isCustomer } from "./roles";
@@ -24,7 +30,10 @@ export function Workspace({
   const [me, setMe] = useState<PanelMe>();
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
-  const [section, setSection] = useState<CustomerSection>("overview");
+  // After register, Identity already emailed a code — open Profile to enter it.
+  const [section, setSection] = useState<CustomerSection>(
+    () => (isVerificationEmailPending() ? "profile" : "overview"),
+  );
 
   useEffect(() => {
     let active = true;

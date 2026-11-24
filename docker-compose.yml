@@ -25,6 +25,8 @@ services:
       # Same-origin Identity proxy in DEV (see vite.config.ts).
       VITE_IDENTITY_API: "/fonitas-api/api/v1"
       VITE_IDENTITY_PROXY_TARGET: "https://api.fonitas.com"
+      # Optional: force an application Identity tenant when Origin resolve is unavailable locally.
+      # VITE_IDENTITY_TENANT_SLUG: "acme-app"
 
   customer:
     image: php:8.2-cli-bookworm

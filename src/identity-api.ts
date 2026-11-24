@@ -1,14 +1,18 @@
 /**
  * Identity API for public registration and email verification (OEM customer profile).
  * In DEV, use the Vite proxy (`/fonitas-api`) so localhost does not depend on CORS.
+ * Buyers register in the application-owned Identity realm (not tenant `fonitas`).
  */
 export const identityApi = (
   import.meta.env.VITE_IDENTITY_API?.trim()
   || (import.meta.env.DEV ? "/fonitas-api/api/v1" : "https://api.fonitas.com/api/v1")
 );
 
-const tenantSlug = () =>
-  import.meta.env.VITE_IDENTITY_TENANT_SLUG?.trim() || "fonitas";
+const envTenantSlug = () =>
+  import.meta.env.VITE_IDENTITY_TENANT_SLUG?.trim() || "";
+
+let resolvedTenantSlug: string | null = envTenantSlug() || null;
+let tenantResolvePromise: Promise<string> | null = null;
 
 function identityRequest(path: string, init?: RequestInit): Promise<Response> {
   return fetch(identityApi + path, {
@@ -27,7 +31,7 @@ export class IdentityApiError extends Error {
   readonly status?: number;
 
   constructor(
-    code: "rate_limited" | "unavailable" | "validation" | "email_taken" | "register_failed",
+    code: "rate_limited" | "unavailable" | "validation" | "email_taken" | "register_failed" | "tenant_unavailable",
     status?: number,
   ) {
     super(code);
@@ -40,21 +44,59 @@ export type IdentityRegisterResult = {
   display_name: string;
   email: string;
   email_verified: boolean;
+  tenant_slug: string;
 };
 
-/** Creates the Fonitas Identity user and triggers the verification email. */
+/** Resolve the application Identity tenant for this installation Origin. */
+export async function resolveIdentityTenantSlug(): Promise<string> {
+  if (resolvedTenantSlug) return resolvedTenantSlug;
+  if (!tenantResolvePromise) {
+    tenantResolvePromise = (async () => {
+      const override = envTenantSlug();
+      if (override) {
+        resolvedTenantSlug = override;
+        return override;
+      }
+      let response: Response;
+      try {
+        // Browser sends Origin for cross-origin / proxied calls; do not set Origin manually.
+        response = await identityRequest("/developer-panels/oem/identity-tenant", { method: "GET" });
+      } catch {
+        throw new IdentityApiError("tenant_unavailable");
+      }
+      if (!response.ok) throw new IdentityApiError("tenant_unavailable", response.status);
+      const body = await response.json() as {
+        data?: { tenant_slug?: string };
+      };
+      const slug = body.data?.tenant_slug?.trim();
+      if (!slug || slug === "fonitas") throw new IdentityApiError("tenant_unavailable", response.status);
+      resolvedTenantSlug = slug;
+      return slug;
+    })().finally(() => {
+      tenantResolvePromise = null;
+    });
+  }
+  return tenantResolvePromise;
+}
+
+async function tenantSlug(): Promise<string> {
+  return resolveIdentityTenantSlug();
+}
+
+/** Creates the Fonitas Identity user in this app's realm and triggers the verification email. */
 export async function registerIdentityUser(input: {
   displayName: string;
   email: string;
   password: string;
 }): Promise<IdentityRegisterResult> {
+  const slug = await tenantSlug();
   let response: Response;
   try {
     response = await identityRequest("/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        tenant_slug: tenantSlug(),
+        tenant_slug: slug,
         display_name: input.displayName,
         email: input.email,
         password: input.password,
@@ -75,22 +117,30 @@ export async function registerIdentityUser(input: {
       display_name: body.data?.display_name || input.displayName,
       email: body.data?.primary_email?.email || input.email,
       email_verified: Boolean(body.data?.primary_email?.is_verified),
+      tenant_slug: slug,
     };
   }
   if (response.status === 409) throw new IdentityApiError("email_taken", 409);
-  if (response.status === 422) throw new IdentityApiError("validation", 422);
+  if (response.status === 422) {
+    const body = await response.json().catch(() => null) as { error?: { code?: string } } | null;
+    if (body?.error?.code === "USER_EMAIL_ALREADY_EXISTS") {
+      throw new IdentityApiError("email_taken", 422);
+    }
+    throw new IdentityApiError("validation", 422);
+  }
   if (response.status === 429) throw new IdentityApiError("rate_limited", 429);
   throw new IdentityApiError("register_failed", response.status);
 }
 
 /** Always returns 204 for accepted shape (anti-enumeration). */
 export async function resendEmailVerification(email: string): Promise<void> {
+  const slug = await tenantSlug();
   let response: Response;
   try {
     response = await identityRequest("/auth/verification/resend", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tenant_slug: tenantSlug(), email }),
+      body: JSON.stringify({ tenant_slug: slug, email }),
     });
   } catch {
     throw new IdentityApiError("unavailable");
@@ -102,12 +152,13 @@ export async function resendEmailVerification(email: string): Promise<void> {
 }
 
 export async function verifyEmailByCode(email: string, code: string): Promise<boolean> {
+  const slug = await tenantSlug();
   let response: Response;
   try {
     response = await identityRequest("/auth/verify-email/code", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tenant_slug: tenantSlug(), email, code }),
+      body: JSON.stringify({ tenant_slug: slug, email, code }),
     });
   } catch {
     throw new IdentityApiError("unavailable");

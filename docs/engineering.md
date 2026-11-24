@@ -59,12 +59,12 @@ Verify Symfony is deployed with the dual-gate policy before relying on localhost
 
 ### First milestone: customer registration from the app site
 
-The app's own website (this OEM panel) hosts login and registration forms. The buyer never leaves that origin for another Fonitas website. Same-origin customer PHP will call Fonitas Identity to create or verify the account. A person who already has a Fonitas account signs in with it on this site. When authentication succeeds, Fonitas resolves the application and its owning company from the registered installation and records the customer relationship.
+The app's own website (this OEM panel) hosts login and registration forms. The buyer never leaves that origin for another Fonitas website. Buyers register and verify email in the **application-owned Identity realm** (not tenant `fonitas`). Symfony provisions that realm when an application is approved (and ensures it when an OEM panel binds an application). The panel resolves `tenant_slug` via `GET /api/v1/developer-panels/oem/identity-tenant` from the installation `Origin` before register / resend / verify-code.
 
-- Record the relationship for the verified identity and the registered application once. A repeat sign-in or callback must reuse the same relationship.
-- Resolve the owning company from the application binding. A browser-supplied company or application identifier does not establish authorization.
-- The customer relationship identifies the buyer in the application. A purchase or license entitlement governs access to paid features.
-- This milestone is planned. The current customer PHP entry point checks installation readiness. [Customer PHP backend](#customer-only-php-backend)
+- Email uniqueness is `(identity_tenant, email)`. The same address may exist on fonitas.com and on App A / App B as separate users.
+- Resolve the application (and owning organization) from the installation binding. A browser-supplied company or application identifier does not establish authorization.
+- Register in an application tenant grants `APP_END_USER` in that realm. Sessions use lane `APPLICATION_TENANT`.
+- Same-origin customer PHP against Identity cookies remains a follow-up; the static UI currently opens a local OEM session after Identity register. [Customer PHP backend](#customer-only-php-backend)
 
 ### Future installation and branding
 
@@ -138,7 +138,7 @@ The current releases give software developers and authorized viewers a read-only
 
 The static React client’s first page is **on-origin customer login and register** ([`main.tsx`](../src/main.tsx)). After sign-in, `APP_END_USER` opens the **customer dashboard** ([`customer-dashboard.tsx`](../src/pages/customer-dashboard.tsx), [`customer-nav.ts`](../src/customer-nav.ts)) with navbar sign-out and a sidebar. Profile consolidates account, password, payment methods, and email. There is **no browser redirect** to the hosted developer portal for buyers. Accounts without `APP_END_USER` see a no-access message.
 
-Register calls Identity `POST /auth/register` (via [`identity-api.ts`](../src/identity-api.ts)), which creates the Fonitas user and dispatches the verification email. The panel then opens a **local OEM session** ([`customer-session.ts`](../src/customer-session.ts)) for the branded shell. Profile **Verify email** uses `POST /auth/verification/resend` and `POST /auth/verify-email/code`. In Docker/Vite DEV those requests go same-origin through `/fonitas-api` (see [`vite.config.ts`](../vite.config.ts)). Resend returns `204` even for unknown emails (anti-enumeration). Installation pairing is not on the customer landing; open `?setup=1` for the connection-key form.
+Register resolves the application Identity tenant, then calls `POST /auth/register` (via [`identity-api.ts`](../src/identity-api.ts)) with that `tenant_slug`. Identity creates the user, grants `APP_END_USER`, and dispatches the verification email. The panel then opens a **local OEM session** ([`customer-session.ts`](../src/customer-session.ts)) for the branded shell and, when the email is still unverified, opens **Profile** with the 8-character code field ready. Profile verification uses `POST /auth/verification/resend` and `POST /auth/verify-email/code` with the same tenant. In Docker/Vite DEV those requests go same-origin through `/fonitas-api` (see [`vite.config.ts`](../vite.config.ts)). Optional `VITE_IDENTITY_TENANT_SLUG` overrides resolve for local testing only. Resend returns `204` even for unknown emails (anti-enumeration). Installation pairing is not on the customer landing; open `?setup=1` for the connection-key form.
 
 Identity `GET /api/v1/auth/me` returns `display_name`, `roles`, and `permissions`. Prefer **permissions** for action gates when those APIs ship.
 
@@ -156,7 +156,7 @@ The static UI uses [`isAllowedPanelOrigin`](../src/origin.ts) before pairing and
 | Order | Work | Owner |
 | --- | --- | --- |
 | 1 | Deploy / verify Symfony fail-closed localhost origin policy with the self-hosted client | `symfony_fonitas` + this repo |
-| 2 | Same-origin buyer login/register via customer PHP against verified Identity (replace local OEM session) | Symfony + customer PHP + static client |
+| 2 | Same-origin buyer login via customer PHP / Identity cookies in the application realm (replace local OEM session) | Symfony + customer PHP + static client |
 | 3 | Customer dashboard API consumers: purchases, licenses, devices, subscriptions, payments, methods, tickets, email | This repo + Symfony (License, payments, support, mail) |
 | 4 | Application API key contract for software detection (keep domain connection key) | Symfony first, then this repo |
 
