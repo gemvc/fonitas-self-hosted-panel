@@ -209,6 +209,9 @@ function panelDirectory(bool $create): string
         panelFail(503, 'PHP needs write access to the private data directory. Set PANEL_DATA_DIR if necessary.');
     }
     if (is_dir($path) && (fileperms($path) & 0077) !== 0) {
+        @chmod($path, 0700);
+    }
+    if (is_dir($path) && (fileperms($path) & 0077) !== 0) {
         panelFail(503, 'Restrict the private data directory to its owner (0700).');
     }
 
@@ -637,14 +640,19 @@ function panelJson(array $data): never
     exit;
 }
 
-function panelSession(string $origin): void
+function panelSession(string $origin, string $directory): void
 {
     $https = panelRequestIsHttps() || str_starts_with($origin, 'https://');
-    session_name('PanelSetup');
-    $path = session_save_path();
-    if (is_string($path) && $path !== '' && !is_dir($path) && !@mkdir($path, 0700, true) && !is_dir($path)) {
-        panelFail(503, 'PHP session storage is not writable on this host. Check session.save_path.');
+    $sessionDir = $directory.'/sessions';
+    if (!is_dir($sessionDir) && !@mkdir($sessionDir, 0700) && !is_dir($sessionDir)) {
+        panelFail(503, 'PHP needs write access to create '.$sessionDir.' for login sessions.');
     }
+    if (is_dir($sessionDir) && (fileperms($sessionDir) & 0077) !== 0) {
+        @chmod($sessionDir, 0700);
+    }
+    session_save_path($sessionDir);
+    // New cookie name avoids clashes with older path=/setup.php PanelSetup cookies.
+    session_name('PanelSetup2');
     if (!session_start([
         'use_strict_mode' => 1,
         'use_only_cookies' => 1,
@@ -654,14 +662,49 @@ function panelSession(string $origin): void
         'cookie_path' => '/',
         'cache_limiter' => '',
     ])) {
-        panelFail(503, 'PHP could not start a session. Check session.save_path permissions.');
+        panelFail(503, 'PHP could not start a session in the private data directory.');
     }
     if (($_SESSION['origin'] ?? null) !== $origin) {
         $_SESSION = ['origin' => $origin];
     }
+    panelCsrfIssue($https);
+}
+
+/** Issue CSRF into the session and a first-party cookie (double-submit). */
+function panelCsrfIssue(bool $https): string
+{
     if (!isset($_SESSION['csrf']) || !is_string($_SESSION['csrf']) || strlen($_SESSION['csrf']) < 32) {
         $_SESSION['csrf'] = bin2hex(random_bytes(32));
     }
+    $token = $_SESSION['csrf'];
+    setcookie('PanelCsrf', $token, [
+        'expires' => 0,
+        'path' => '/',
+        'secure' => $https,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+
+    return $token;
+}
+
+function panelCsrfValid(string $posted): bool
+{
+    if ($posted === '' || strlen($posted) < 32) {
+        return false;
+    }
+    $session = is_string($_SESSION['csrf'] ?? null) ? $_SESSION['csrf'] : '';
+    if ($session !== '' && hash_equals($session, $posted)) {
+        return true;
+    }
+    $cookie = is_string($_COOKIE['PanelCsrf'] ?? null) ? $_COOKIE['PanelCsrf'] : '';
+    if ($cookie === '' || !hash_equals($cookie, $posted)) {
+        return false;
+    }
+    // Session file was lost between GET and POST; restore the accepted token.
+    $_SESSION['csrf'] = $posted;
+
+    return true;
 }
 
 function panelInstallFromValues(
@@ -833,7 +876,8 @@ function panelBrandingFields(array $brand): void
 function panelForm(string $action): void
 {
     $encoding = in_array($action, ['install', 'settings'], true) ? ' enctype="multipart/form-data"' : '';
-    echo '<form method="post" action="/setup.php"'.$encoding.'><input type="hidden" name="csrf" value="'.panelEscape($_SESSION['csrf']).'">';
+    $https = panelRequestIsHttps() || str_starts_with((string) ($_SESSION['origin'] ?? ''), 'https://');
+    echo '<form method="post" action="/setup.php"'.$encoding.'><input type="hidden" name="csrf" value="'.panelEscape(panelCsrfIssue($https)).'">';
     echo '<input type="hidden" name="action" value="'.panelEscape($action).'">';
 }
 
@@ -845,17 +889,18 @@ header('Referrer-Policy: no-referrer');
 header('X-Frame-Options: DENY');
 $runtime = defined('PANEL_RUNTIME');
 $origin = panelOrigin();
-$directory = panelDirectory(!$runtime && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST');
+// Always ensure the private data dir exists so login sessions have a writable save_path.
+$directory = panelDirectory(true);
 $state = panelState($directory);
 if ($state !== [] && $state['origin'] !== $origin) {
-    panelFail(400, 'This dashboard belongs to another address.');
+    panelFail(400, 'This dashboard belongs to another address. PANEL_ORIGIN / HTTPS host must match the installed origin exactly.');
 }
 if (!extension_loaded('curl') || !extension_loaded('zip') || !extension_loaded('openssl')) {
     panelFail(503, 'Enable the PHP cURL, ZIP and OpenSSL extensions.');
 }
 panelLoadEnv();
 panelProtectEnvFile();
-panelSession($origin);
+panelSession($origin, $directory);
 if ($runtime) {
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
         panelFail(405, 'Method unavailable.');
@@ -865,10 +910,10 @@ if ($runtime) {
 $error = '';
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     $csrfPosted = panelField('csrf');
-    $csrfSession = is_string($_SESSION['csrf'] ?? null) ? $_SESSION['csrf'] : '';
-    if ($csrfPosted === '' || $csrfSession === '' || !hash_equals($csrfSession, $csrfPosted)) {
-        $_SESSION['csrf'] = bin2hex(random_bytes(32));
-        $error = 'Your session expired or cookies were blocked. Reload this page and try again. If it keeps failing, set PANEL_ORIGIN in .env to this exact HTTPS address and confirm the browser stores cookies for this site.';
+    if (!panelCsrfValid($csrfPosted)) {
+        $https = panelRequestIsHttps() || str_starts_with($origin, 'https://');
+        panelCsrfIssue($https);
+        $error = 'Login form expired. Clear site cookies (or use a private window), reload once, then sign in with PANEL_ADMIN_USER / PANEL_ADMIN_PASSWORD from .env. Set PANEL_ORIGIN to '.$origin.' if this host sits behind a proxy.';
     } else {
         $lock = fopen($directory.'/manage.lock', 'c');
         if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {

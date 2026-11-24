@@ -309,7 +309,7 @@ The upload contains the three PHP files and the public rewrite configuration. Ke
 | Configuration | Owner and behavior |
 | --- | --- |
 | `.env` | Document-root file. Source of `PANEL_ADMIN_USER`, `PANEL_ADMIN_PASSWORD`, optional `PANEL_CONNECTION_KEY` / branding / `PANEL_ORIGIN`. Required for install and login |
-| `PANEL_DATA_DIR` | PHP environment override. Absolute path outside the document root, mode `0700`. Default: hidden sibling of the document root |
+| `PANEL_DATA_DIR` | PHP environment override. Absolute path outside the document root, mode `0700`. Default: hidden sibling of the document root. Login sessions are stored under `$PANEL_DATA_DIR/sessions` |
 | `PANEL_ORIGIN` | Optional exact origin when behind an HTTPS-terminating proxy |
 | `APP_ENV` / `PANEL_ALLOW_LOCALHOST` | Fail-closed loopback gates for local development only |
 | `state.json` | Private installer state: origin, password hash fallback, installation credential, branding, active/previous release ids |
@@ -325,6 +325,7 @@ For an expired key or an older request without a key, select **Get connection ke
 | The installer rejects the connection key | In **Custom Domains**, check the exact HTTPS origin and the application binding. Generate a new key if the previous key has expired or been used. |
 | The logo upload asks for a PNG within the limits | Check that the image content is actually PNG. The logo limit is 1 MiB and 2048 pixels per side. The favicon has its own limit of 64 KiB and 256 pixels per side. Both are optional at installation and can be added in setup later. |
 | The dashboard redirects to `/setup.php` | Sign in with `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD` from `.env`. There is no Directory Privacy step. |
+| Sign-in says the form expired / cookies were blocked | Confirm `PANEL_ORIGIN` matches the browser HTTPS address. Clear site cookies or use a private window, reload once, then retry. Replace `setup.php` with the latest release asset so sessions use the private data directory and double-submit CSRF. |
 | The dashboard opens and the application is unavailable | Check the installation credential, application binding, and backend response. [OEM service][oem-service] |
 
 Dashboard and setup share one PHP session after `.env` login. Updates use **Download and install** on `/setup.php` (signed GitHub release). Reconnect only when Custom Domains issues a new `fpk_` key. [PHP runtime and settings](../installer/setup.php)
