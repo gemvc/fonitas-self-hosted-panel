@@ -20,7 +20,58 @@ function panelEscape(string $value): string
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
-/** Load document-root `.env` into putenv/$_ENV once (does not override real process env). */
+/**
+ * Values parsed from document-root `.env`. File values win over process env so
+ * shared-hosting empty PANEL_* variables cannot block login.
+ *
+ * @var array<string, string>
+ */
+function panelEnvFile(): array
+{
+    static $values = null;
+    if (is_array($values)) {
+        return $values;
+    }
+    $values = [];
+    $path = __DIR__.'/.env';
+    if (!is_file($path) || !is_readable($path)) {
+        return $values;
+    }
+    $raw = file_get_contents($path);
+    if ($raw === false) {
+        return $values;
+    }
+    if (str_starts_with($raw, "\xEF\xBB\xBF")) {
+        $raw = substr($raw, 3);
+    }
+    foreach (preg_split('/\R/', $raw) ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+            continue;
+        }
+        if (str_starts_with($line, 'export ')) {
+            $line = trim(substr($line, 7));
+        }
+        [$name, $value] = explode('=', $line, 2);
+        $name = trim($name);
+        if ($name === '' || !preg_match('/\A[A-Z][A-Z0-9_]*\z/', $name)) {
+            continue;
+        }
+        $value = trim($value);
+        if (
+            (str_starts_with($value, '"') && str_ends_with($value, '"'))
+            || (str_starts_with($value, "'") && str_ends_with($value, "'"))
+        ) {
+            $value = substr($value, 1, -1);
+            $value = str_replace(['\\n', '\\r', '\\t', '\\"', "\\'", '\\\\'], ["\n", "\r", "\t", '"', "'", '\\'], $value);
+        }
+        $values[$name] = $value;
+    }
+
+    return $values;
+}
+
+/** Load document-root `.env` into putenv/$_ENV once. File values always win. */
 function panelLoadEnv(): void
 {
     static $loaded = false;
@@ -28,56 +79,36 @@ function panelLoadEnv(): void
         return;
     }
     $loaded = true;
-    $path = __DIR__.'/.env';
-    if (!is_file($path) || !is_readable($path)) {
-        return;
-    }
-    $lines = file($path, FILE_IGNORE_NEW_LINES);
-    if ($lines === false) {
-        return;
-    }
-    foreach ($lines as $line) {
-        $line = trim($line);
-        if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
-            continue;
-        }
-        [$name, $value] = explode('=', $line, 2);
-        $name = trim($name);
-        $value = trim($value);
-        if ($name === '' || !preg_match('/\A[A-Z][A-Z0-9_]*\z/', $name)) {
-            continue;
-        }
-        if (
-            (str_starts_with($value, '"') && str_ends_with($value, '"'))
-            || (str_starts_with($value, "'") && str_ends_with($value, "'"))
-        ) {
-            $value = substr($value, 1, -1);
-        }
-        if (getenv($name) === false) {
-            putenv($name.'='.$value);
-            $_ENV[$name] = $value;
-        }
+    foreach (panelEnvFile() as $name => $value) {
+        putenv($name.'='.$value);
+        $_ENV[$name] = $value;
+        $_SERVER[$name] = $value;
     }
 }
 
 function panelEnv(string $name, string $default = ''): string
 {
     panelLoadEnv();
+    $file = panelEnvFile();
+    if (array_key_exists($name, $file)) {
+        return $file[$name];
+    }
     $value = getenv($name);
 
-    return is_string($value) ? $value : $default;
+    return is_string($value) && $value !== '' ? $value : $default;
 }
 
 /** @return array{user: string, password: string} */
 function panelRequireAdminEnv(): array
 {
     $user = trim(panelEnv('PANEL_ADMIN_USER'));
+    // Password: keep exact .env value (no extra trim beyond file parse).
     $password = panelEnv('PANEL_ADMIN_PASSWORD');
     if ($user === '' || strlen($user) > 120 || !preg_match('/\A[\x21-\x7e]+\z/', $user)) {
         throw new RuntimeException('Set PANEL_ADMIN_USER in .env (printable username, max 120 characters).');
     }
     if (strlen($password) < 16 || strlen($password) > 72) {
-        throw new RuntimeException('Set PANEL_ADMIN_PASSWORD in .env (16–72 characters).');
+        throw new RuntimeException('Set PANEL_ADMIN_PASSWORD in .env (16–72 characters). Current length: '.strlen($password).'.');
     }
 
     return ['user' => $user, 'password' => $password];
@@ -749,14 +780,45 @@ function panelVerifyAdminLogin(string $user, #[SensitiveParameter] string $passw
 {
     try {
         $creds = panelRequireAdminEnv();
+        if (hash_equals($creds['user'], $user) && hash_equals($creds['password'], $password)) {
+            return true;
+        }
+        // Allow the password saved at install time when .env user matches but the
+        // operator still uses the original install password (common after edits).
+        if (hash_equals($creds['user'], $user)
+            && isset($state['password'])
+            && is_string($state['password'])
+            && password_verify($password, $state['password'])) {
+            return true;
+        }
 
-        return hash_equals($creds['user'], $user) && hash_equals($creds['password'], $password);
+        return false;
     } catch (RuntimeException) {
         return $user === 'admin'
             && isset($state['password'])
             && is_string($state['password'])
             && password_verify($password, $state['password']);
     }
+}
+
+function panelLoginFailureMessage(string $user, #[SensitiveParameter] string $password): string
+{
+    try {
+        $creds = panelRequireAdminEnv();
+    } catch (RuntimeException $exception) {
+        return $exception->getMessage();
+    }
+    if (!hash_equals($creds['user'], $user)) {
+        return 'Username does not match PANEL_ADMIN_USER in .env (check spelling and capital letters).';
+    }
+    if ($password === '') {
+        return 'Password was empty. Enter PANEL_ADMIN_PASSWORD from .env.';
+    }
+    if (strlen($password) !== strlen($creds['password'])) {
+        return 'Password does not match PANEL_ADMIN_PASSWORD in .env (length differs: typed '.strlen($password).', .env '.strlen($creds['password']).'). Remove extra quotes around the value in .env unless they are part of the password.';
+    }
+
+    return 'Password does not match PANEL_ADMIN_PASSWORD in .env. Open .env next to setup.php, copy the value after PANEL_ADMIN_PASSWORD= exactly, save the file, then try again.';
 }
 
 function panelAction(string $directory, string $origin, array $state, string $action): void
@@ -801,10 +863,12 @@ function panelAction(string $directory, string $origin, array $state, string $ac
     }
     if ($action === 'login') {
         $user = panelField('username');
-        $password = panelField('password');
+        // Do not trim passwords — .env parse already trims unquoted values; trimming here
+        // only hides mismatches when the stored secret has edge spaces inside quotes.
+        $password = is_string($_POST['password'] ?? null) ? $_POST['password'] : '';
         if (strlen($password) > 72 || !panelVerifyAdminLogin($user, $password, $state)) {
             usleep(350000);
-            throw new RuntimeException('Invalid username or password. Use PANEL_ADMIN_USER / PANEL_ADMIN_PASSWORD from .env.');
+            throw new RuntimeException(panelLoginFailureMessage($user, $password));
         }
         session_regenerate_id(true);
         $_SESSION['adminUntil'] = time() + 28800;
