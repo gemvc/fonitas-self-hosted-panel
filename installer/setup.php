@@ -20,48 +20,107 @@ function panelEscape(string $value): string
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
-/**
- * Viewer identity from the host auth module only (never from a client-forged header).
- * Apache often sets REMOTE_USER; cPanel Directory Privacy / PHP-FPM often sets PHP_AUTH_USER.
- */
-function panelViewerIdentity(): string
+/** Load document-root `.env` into putenv/$_ENV once (does not override real process env). */
+function panelLoadEnv(): void
 {
-    foreach (['REMOTE_USER', 'REDIRECT_REMOTE_USER', 'PHP_AUTH_USER'] as $key) {
-        $value = $_SERVER[$key] ?? '';
-        if (is_string($value) && $value !== '') {
-            return $value;
+    static $loaded = false;
+    if ($loaded) {
+        return;
+    }
+    $loaded = true;
+    $path = __DIR__.'/.env';
+    if (!is_file($path) || !is_readable($path)) {
+        return;
+    }
+    $lines = file($path, FILE_IGNORE_NEW_LINES);
+    if ($lines === false) {
+        return;
+    }
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+            continue;
+        }
+        [$name, $value] = explode('=', $line, 2);
+        $name = trim($name);
+        $value = trim($value);
+        if ($name === '' || !preg_match('/\A[A-Z][A-Z0-9_]*\z/', $name)) {
+            continue;
+        }
+        if (
+            (str_starts_with($value, '"') && str_ends_with($value, '"'))
+            || (str_starts_with($value, "'") && str_ends_with($value, "'"))
+        ) {
+            $value = substr($value, 1, -1);
+        }
+        if (getenv($name) === false) {
+            putenv($name.'='.$value);
+            $_ENV[$name] = $value;
         }
     }
-
-    return '';
 }
 
-/** Explain the viewer gate when the dashboard is opened without access. */
-function panelAccessDenied(?string $identity): never
+function panelEnv(string $name, string $default = ''): string
 {
-    http_response_code(403);
-    header('Content-Type: text/html; charset=utf-8');
-    header('Cache-Control: no-store');
-    $who = $identity === null || $identity === ''
-        ? 'Your host did not send a signed-in username to PHP (no <code>REMOTE_USER</code> / <code>PHP_AUTH_USER</code>).'
-        : 'Signed-in as <code>'.panelEscape($identity).'</code>, which is not on the Authorized users list.';
-    echo '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
-    echo '<title>Dashboard access</title><style>body{margin:3rem auto;padding:0 1rem;max-width:40rem;font:1rem system-ui;line-height:1.5;color:#172234}';
-    echo 'ol{padding-left:1.25rem}code{font:0.95rem ui-monospace,monospace}a{color:#1a4f9c}</style>';
-    echo '<h1>You do not have access to this dashboard</h1>';
-    echo '<p>'.$who.'</p>';
-    echo '<p>This page is separate from Fonitas login. Access needs two things:</p><ol>';
-    echo '<li>Password-protect this folder (cPanel <strong>Directory Privacy</strong>). When the browser asks for a username/password, that username must reach PHP.</li>';
-    echo '<li>Open <a href="/setup.php">/setup.php</a>, sign in with the <strong>management password</strong>, and add that exact username under <strong>Authorized users</strong> (one per line).</li>';
-    echo '</ol><p>Then reload this page and sign in with that host username when the browser prompts.</p></html>';
+    panelLoadEnv();
+    $value = getenv($name);
+
+    return is_string($value) ? $value : $default;
+}
+
+/** @return array{user: string, password: string} */
+function panelRequireAdminEnv(): array
+{
+    $user = trim(panelEnv('PANEL_ADMIN_USER'));
+    $password = panelEnv('PANEL_ADMIN_PASSWORD');
+    if ($user === '' || strlen($user) > 120 || !preg_match('/\A[\x21-\x7e]+\z/', $user)) {
+        throw new RuntimeException('Set PANEL_ADMIN_USER in .env (printable username, max 120 characters).');
+    }
+    if (strlen($password) < 16 || strlen($password) > 72) {
+        throw new RuntimeException('Set PANEL_ADMIN_PASSWORD in .env (16–72 characters).');
+    }
+
+    return ['user' => $user, 'password' => $password];
+}
+
+function panelEnvReady(): bool
+{
+    try {
+        panelRequireAdminEnv();
+
+        return true;
+    } catch (RuntimeException) {
+        return false;
+    }
+}
+
+function panelIsAdmin(): bool
+{
+    return ($_SESSION['adminUntil'] ?? 0) >= time();
+}
+
+function panelRequireLoginRedirect(): never
+{
+    header('Location: /setup.php?next=/', true, 302);
     exit;
+}
+
+/** Block web downloads of `.env` when Apache allows `.htaccess`. */
+function panelProtectEnvFile(): void
+{
+    $htaccess = __DIR__.'/.htaccess';
+    if (is_file($htaccess) || is_link($htaccess)) {
+        return;
+    }
+    @file_put_contents($htaccess, "<Files \".env\">\nRequire all denied\n</Files>\n");
 }
 
 /** Fail-closed: loopback only when APP_ENV is dev|development and PANEL_ALLOW_LOCALHOST is true. */
 function panelAllowsLocalhost(): bool
 {
-    $env = strtolower((string) (getenv('APP_ENV') !== false ? getenv('APP_ENV') : 'production'));
-    $flag = strtolower((string) (getenv('PANEL_ALLOW_LOCALHOST') !== false ? getenv('PANEL_ALLOW_LOCALHOST') : 'false'));
+    panelLoadEnv();
+    $env = strtolower(panelEnv('APP_ENV', 'production'));
+    $flag = strtolower(panelEnv('PANEL_ALLOW_LOCALHOST', 'false'));
     $dev = $env === 'dev' || $env === 'development';
     $enabled = in_array($flag, ['1', 'true', 'yes'], true);
 
@@ -77,11 +136,12 @@ function panelIsLoopbackHost(string $host): bool
 
 function panelOrigin(): string
 {
+    panelLoadEnv();
     $https = in_array(strtolower($_SERVER['HTTPS'] ?? ''), ['on', '1'], true);
     $authority = strtolower($_SERVER['HTTP_HOST'] ?? '');
     $authority = preg_replace($https ? '~:443\z~' : '~:80\z~', '', $authority) ?? $authority;
-    $configured = getenv('PANEL_ORIGIN');
-    if ($configured !== false) {
+    $configured = panelEnv('PANEL_ORIGIN');
+    if ($configured !== '') {
         $origin = $configured;
     } elseif ($https) {
         $origin = 'https://'.$authority;
@@ -105,7 +165,7 @@ function panelOrigin(): string
     if ($scheme === 'http' && (!panelAllowsLocalhost() || !panelIsLoopbackHost($host))) {
         panelFail(400, 'Open this panel through its configured HTTPS address.');
     }
-    if ($scheme === 'https' && !$https && $configured === false) {
+    if ($scheme === 'https' && !$https && $configured === '') {
         panelFail(400, 'Open this panel through its configured HTTPS address.');
     }
 
@@ -510,9 +570,8 @@ function panelRuntime(array $state, string $directory): never
         exit;
     }
 
-    $identity = panelViewerIdentity();
-    if ($identity === '' || !in_array($identity, $state['users'] ?? [], true)) {
-        panelAccessDenied($identity === '' ? null : $identity);
+    if (!panelIsAdmin()) {
+        panelRequireLoginRedirect();
     }
     $brandAsset = $_GET['brand'] ?? null;
     if ($brandAsset !== null) {
@@ -568,10 +627,12 @@ function panelJson(array $data): never
 
 function panelSession(string $origin): void
 {
+    $https = in_array(strtolower($_SERVER['HTTPS'] ?? ''), ['on', '1'], true)
+        || str_starts_with($origin, 'https://');
     session_name('PanelSetup');
     session_start([
-        'use_strict_mode' => 1, 'use_only_cookies' => 1, 'cookie_secure' => true, 'cookie_httponly' => true,
-        'cookie_samesite' => 'Strict', 'cookie_path' => '/setup.php', 'cache_limiter' => '',
+        'use_strict_mode' => 1, 'use_only_cookies' => 1, 'cookie_secure' => $https, 'cookie_httponly' => true,
+        'cookie_samesite' => 'Strict', 'cookie_path' => '/', 'cache_limiter' => '',
     ]);
     if (($_SESSION['origin'] ?? null) !== $origin) {
         $_SESSION = ['origin' => $origin];
@@ -579,39 +640,92 @@ function panelSession(string $origin): void
     $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
 }
 
+function panelInstallFromValues(
+    string $directory,
+    string $origin,
+    #[SensitiveParameter] string $key,
+    #[SensitiveParameter] string $password,
+    array $branding,
+): void {
+    $created = false;
+    $staticBackup = null;
+    try {
+        $branding = panelBrandImages($directory, $branding);
+        $active = panelStageRelease($directory, panelLatestRelease());
+        $created = panelInstallEntry();
+        $staticBackup = panelBackupStaticIndex($directory);
+        $credential = panelActivate($origin, $key);
+        panelSave($directory, [
+            'origin' => $origin,
+            'password' => password_hash($password, PASSWORD_DEFAULT),
+            'credential' => $credential,
+            'branding' => $branding,
+            'users' => [],
+            'active' => $active,
+            'previous' => null,
+        ]);
+    } catch (Throwable $exception) {
+        if ($created) {
+            @unlink(__DIR__.'/index.php');
+        }
+        if ($staticBackup !== null && (file_exists(__DIR__.'/index.html') || is_link(__DIR__.'/index.html')
+            || !@rename($staticBackup, __DIR__.'/index.html'))) {
+            throw new RuntimeException('Installation failed. The old dashboard is still backed up as legacy-index.html in the private data directory.', previous: $exception);
+        }
+        throw $exception;
+    }
+    session_regenerate_id(true);
+    $_SESSION['adminUntil'] = time() + 28800;
+}
+
+function panelVerifyAdminLogin(string $user, #[SensitiveParameter] string $password, array $state): bool
+{
+    try {
+        $creds = panelRequireAdminEnv();
+
+        return hash_equals($creds['user'], $user) && hash_equals($creds['password'], $password);
+    } catch (RuntimeException) {
+        return $user === 'admin'
+            && isset($state['password'])
+            && is_string($state['password'])
+            && password_verify($password, $state['password']);
+    }
+}
+
 function panelAction(string $directory, string $origin, array $state, string $action): void
 {
+    if ($state === [] && $action === 'install-env') {
+        $creds = panelRequireAdminEnv();
+        $key = trim(panelEnv('PANEL_CONNECTION_KEY'));
+        if ($key === '') {
+            throw new RuntimeException('Set PANEL_CONNECTION_KEY in .env (from Custom Domains → Show connection key).');
+        }
+        $branding = [
+            'name' => trim(panelEnv('PANEL_BRAND_NAME', 'Dashboard')),
+            'logo' => '',
+            'accent' => trim(panelEnv('PANEL_ACCENT', '#2858b8')),
+            'language' => trim(panelEnv('PANEL_LANGUAGE', 'en')),
+            'support' => trim(panelEnv('PANEL_SUPPORT_URL')),
+        ];
+        if ($branding['name'] === '' || strlen($branding['name']) > 120
+            || !preg_match('/\A#[0-9a-fA-F]{6}\z/', $branding['accent'])
+            || !in_array($branding['language'], ['en', 'fa', 'ar'], true)) {
+            throw new RuntimeException('Check PANEL_BRAND_NAME, PANEL_ACCENT (#rrggbb), and PANEL_LANGUAGE (en|fa|ar) in .env.');
+        }
+        if ($branding['support'] !== '' && (strlen($branding['support']) > 512
+            || !filter_var($branding['support'], FILTER_VALIDATE_URL)
+            || parse_url($branding['support'], PHP_URL_SCHEME) !== 'https'
+            || parse_url($branding['support'], PHP_URL_USER) !== null)) {
+            throw new RuntimeException('PANEL_SUPPORT_URL must be empty or an HTTPS URL.');
+        }
+        panelInstallFromValues($directory, $origin, $key, $creds['password'], $branding);
+
+        return;
+    }
     if ($state === [] && $action === 'install') {
-        $password = panelField('password');
-        if (strlen($password) < 16 || strlen($password) > 72) {
-            throw new RuntimeException('Choose a management password between 16 and 72 bytes.');
-        }
+        $creds = panelRequireAdminEnv();
         $branding = panelBranding([]);
-        $users = panelUsers();
-        $created = false;
-        $staticBackup = null;
-        try {
-            $branding = panelBrandImages($directory, $branding);
-            $active = panelStageRelease($directory, panelLatestRelease());
-            $created = panelInstallEntry();
-            $staticBackup = panelBackupStaticIndex($directory);
-            $credential = panelActivate($origin, panelField('key'));
-            panelSave($directory, [
-                'origin' => $origin, 'password' => password_hash($password, PASSWORD_DEFAULT), 'credential' => $credential,
-                'branding' => $branding, 'users' => $users, 'active' => $active, 'previous' => null,
-            ]);
-        } catch (Throwable $exception) {
-            if ($created) {
-                @unlink(__DIR__.'/index.php');
-            }
-            if ($staticBackup !== null && (file_exists(__DIR__.'/index.html') || is_link(__DIR__.'/index.html')
-                || !@rename($staticBackup, __DIR__.'/index.html'))) {
-                throw new RuntimeException('Installation failed. The old dashboard is still backed up as legacy-index.html in the private data directory.', previous: $exception);
-            }
-            throw $exception;
-        }
-        session_regenerate_id(true);
-        $_SESSION['adminUntil'] = time() + 900;
+        panelInstallFromValues($directory, $origin, panelField('key'), $creds['password'], $branding);
 
         return;
     }
@@ -619,13 +733,14 @@ function panelAction(string $directory, string $origin, array $state, string $ac
         throw new RuntimeException('Install the dashboard first.');
     }
     if ($action === 'login') {
+        $user = panelField('username');
         $password = panelField('password');
-        if (strlen($password) > 72 || !password_verify($password, $state['password'])) {
+        if (strlen($password) > 72 || !panelVerifyAdminLogin($user, $password, $state)) {
             usleep(350000);
-            throw new RuntimeException('Invalid management password.');
+            throw new RuntimeException('Invalid username or password. Use PANEL_ADMIN_USER / PANEL_ADMIN_PASSWORD from .env.');
         }
         session_regenerate_id(true);
-        $_SESSION['adminUntil'] = time() + 900;
+        $_SESSION['adminUntil'] = time() + 28800;
 
         return;
     }
@@ -644,7 +759,6 @@ function panelAction(string $directory, string $origin, array $state, string $ac
         return;
     }
     if ($action === 'settings') {
-        $state['users'] = panelUsers();
         $state['branding'] = panelBrandImages($directory, panelBranding($state['branding']));
     } elseif ($action === 'update') {
         unset($_SESSION['releaseCheck']);
@@ -664,14 +778,18 @@ function panelAction(string $directory, string $origin, array $state, string $ac
         $state['active'] = $state['previous'];
         $state['previous'] = null;
     } elseif ($action === 'reconnect') {
-        $state['credential'] = panelActivate($origin, panelField('key'));
+        $key = panelField('key');
+        if ($key === '') {
+            $key = trim(panelEnv('PANEL_CONNECTION_KEY'));
+        }
+        $state['credential'] = panelActivate($origin, $key);
     } else {
         throw new RuntimeException('The requested action is unavailable.');
     }
     panelSave($directory, $state);
 }
 
-function panelBrandingFields(array $brand, array $users): void
+function panelBrandingFields(array $brand): void
 {
     echo '<fieldset class="block"><legend>Branding</legend>';
     echo '<label>Brand name <input name="name" required maxlength="120" value="'.panelEscape($brand['name']).'"></label>';
@@ -686,10 +804,6 @@ function panelBrandingFields(array $brand, array $users): void
         echo '<option value="'.$code.'"'.($brand['language'] === $code ? ' selected' : '').'>'.$name.'</option>';
     }
     echo '</select></label></fieldset>';
-    echo '<fieldset class="block"><legend>Who can open the dashboard</legend>';
-    echo '<p class="hint">The dashboard is <strong>not</strong> opened with your Fonitas account. Enable cPanel <strong>Directory Privacy</strong> on this folder, then list those usernames here — exact match, one per line. PHP reads <code>REMOTE_USER</code> or <code>PHP_AUTH_USER</code>.</p>';
-    echo '<label>Authorized users <textarea name="users" rows="5" maxlength="8192" placeholder="alice&#10;bob">'.panelEscape(implode("\n", $users)).'</textarea></label>';
-    echo '<p class="hint">Empty list = nobody can open the dashboard. This <code>/setup.php</code> page still uses the management password only.</p></fieldset>';
 }
 
 function panelForm(string $action): void
@@ -715,14 +829,15 @@ if ($state !== [] && $state['origin'] !== $origin) {
 if (!extension_loaded('curl') || !extension_loaded('zip') || !extension_loaded('openssl')) {
     panelFail(503, 'Enable the PHP cURL, ZIP and OpenSSL extensions.');
 }
+panelLoadEnv();
+panelProtectEnvFile();
+panelSession($origin);
 if ($runtime) {
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
         panelFail(405, 'Method unavailable.');
     }
     panelRuntime($state, $directory);
 }
-
-panelSession($origin);
 $error = '';
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     if (!hash_equals($_SESSION['csrf'], panelField('csrf'))) {
@@ -735,13 +850,22 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     try {
         $action = panelField('action');
         panelAction($directory, $origin, panelState($directory), $action);
-        if (in_array($action, ['install', 'settings'], true)) {
+        if (in_array($action, ['install', 'install-env', 'settings'], true)) {
             panelPruneBrandImages($directory, panelState($directory)['branding'] ?? []);
+        }
+        $next = panelField('next');
+        if ($action === 'login' && $next === '/') {
+            header('Location: /', true, 303);
+            exit;
+        }
+        if ($action === 'install-env' || $action === 'install') {
+            header('Location: /setup.php?saved=1', true, 303);
+            exit;
         }
         header('Location: /setup.php'.($action === 'check-update' ? '' : '?saved=1'), true, 303);
         exit;
     } catch (RuntimeException $exception) {
-        if (in_array($action ?? '', ['install', 'settings'], true)) {
+        if (in_array($action ?? '', ['install', 'install-env', 'settings'], true)) {
             panelPruneBrandImages($directory, panelState($directory)['branding'] ?? []);
         }
         $error = $exception->getMessage();
@@ -749,15 +873,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         fclose($lock);
     }
 }
-$admin = $state !== [] && ($_SESSION['adminUntil'] ?? 0) >= time();
+$admin = $state !== [] && panelIsAdmin();
+$envReady = panelEnvReady();
+$envHasKey = trim(panelEnv('PANEL_CONNECTION_KEY')) !== '';
 if ($admin) {
     $state = panelState($directory);
     $installedVersion = panelInstalledVersion($state['active']);
     $releaseStatus = panelReleaseStatus();
     $latest = $releaseStatus['release'];
 }
+$loginNext = isset($_GET['next']) && $_GET['next'] === '/' ? '/' : '';
 header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
-$viewerCount = is_array($state['users'] ?? null) ? count($state['users']) : 0;
 ?>
 <!doctype html>
 <html lang="en">
@@ -780,44 +906,59 @@ button{font:inherit;padding:.55rem .9rem;margin:.35rem .5rem .35rem 0;cursor:poi
 code{font:0.92rem ui-monospace,monospace}a{color:#1a4f9c}
 </style>
 <h1>Dashboard setup</h1>
-<p class="lead">Manage installation for <strong><?= panelEscape($origin) ?></strong>. This page is for the site owner (management password). Day-to-day dashboard viewers use your host’s Directory Privacy username.</p>
+<p class="lead">Installation for <strong><?= panelEscape($origin) ?></strong>. Login, install, and updates use <code>.env</code> in this folder — no cPanel Directory Privacy.</p>
 <?php if ($error !== ''): ?><p role="alert"><?= panelEscape($error) ?></p><?php endif; ?>
-<?php if (isset($_GET['saved']) && $admin): ?><p role="status" class="ok">Saved. If you changed Authorized users, open the dashboard again with that host username.</p><?php endif; ?>
+<?php if (isset($_GET['saved']) && $admin): ?><p role="status" class="ok">Done. You can open the dashboard.</p><?php endif; ?>
 <?php if ($state === []): ?>
-<section class="notice">
-<p><strong>First-time install — do this in order:</strong></p>
+<section class="notice<?= $envReady && $envHasKey ? '' : ' warn' ?>">
+<p><strong>One-time setup</strong></p>
 <ol class="steps">
-<li>In the <a href="https://developerpannel.fonitas.com/settings/custom-domains" rel="noreferrer">developer portal → Custom Domains</a>, request this exact address and choose the application.</li>
-<li>Copy the connection key (valid about 15 minutes).</li>
-<li>Paste it below, choose a management password (16+ characters), set brand name, and add at least one <strong>Authorized user</strong>.</li>
-<li>After install, enable cPanel <strong>Directory Privacy</strong> on this folder with that same username, then open the site root.</li>
+<li>Upload <code>setup.php</code> and a <code>.env</code> file into this document root.</li>
+<li>In <a href="https://developerpannel.fonitas.com/settings/custom-domains" rel="noreferrer">Custom Domains</a>, request <strong><?= panelEscape($origin) ?></strong> and copy the connection key into <code>PANEL_CONNECTION_KEY</code>.</li>
+<li>Set <code>PANEL_ADMIN_USER</code> and <code>PANEL_ADMIN_PASSWORD</code> (16+ characters) in <code>.env</code>.</li>
+<li>Click install below — PHP downloads the latest signed release, unzips it, and activates Fonitas.</li>
 </ol>
+<?php if (!$envReady): ?>
+<p role="status">Missing <code>PANEL_ADMIN_USER</code> / <code>PANEL_ADMIN_PASSWORD</code> in <code>.env</code>.</p>
+<?php elseif (!$envHasKey): ?>
+<p role="status"><code>.env</code> login is ready. Add <code>PANEL_CONNECTION_KEY</code> from Custom Domains, then install.</p>
+<?php else: ?>
+<p role="status" class="ok"><code>.env</code> looks ready for automatic install.</p>
+<?php endif; ?>
 </section>
+<?php if ($envReady && $envHasKey): ?>
+<?php panelForm('install-env'); ?>
+<button>Install latest dashboard from .env</button></form>
+<?php endif; ?>
+<details class="block"><summary>Advanced: install with a pasted key</summary>
+<p class="hint">Still requires <code>PANEL_ADMIN_USER</code> / <code>PANEL_ADMIN_PASSWORD</code> in <code>.env</code>. Optional branding fields can override <code>PANEL_BRAND_*</code>.</p>
+<?php if ($envReady): ?>
 <?php panelForm('install'); ?>
-<fieldset class="block"><legend>1. Connect to Fonitas</legend>
 <label>Connection key <input type="password" name="key" required autocomplete="off"></label>
-<p class="hint">From Custom Domains → Show connection key. Not your Fonitas login password.</p>
-<label>New management password <input type="password" name="password" required minlength="16" maxlength="72" autocomplete="new-password"></label>
-<p class="hint">Only for this <code>/setup.php</code> page (settings and updates). Keep it private.</p>
-</fieldset>
-<?php panelBrandingFields(['name' => '', 'logo' => '', 'accent' => '#2858b8', 'language' => 'en', 'support' => ''], []); ?>
+<?php panelBrandingFields([
+    'name' => trim(panelEnv('PANEL_BRAND_NAME', 'Dashboard')),
+    'logo' => '',
+    'accent' => trim(panelEnv('PANEL_ACCENT', '#2858b8')) ?: '#2858b8',
+    'language' => trim(panelEnv('PANEL_LANGUAGE', 'en')) ?: 'en',
+    'support' => trim(panelEnv('PANEL_SUPPORT_URL')),
+]); ?>
 <button>Install dashboard</button></form>
+<?php else: ?>
+<p class="hint">Create <code>.env</code> first.</p>
+<?php endif; ?>
+</details>
 <?php elseif (!$admin): ?>
 <section class="notice">
-<p>Sign in with the <strong>management password</strong> you chose at install. That is not your Fonitas account, and not the Directory Privacy username used to view the dashboard.</p>
-<p class="hint">Seeing “You do not have access to this dashboard” on the home page? Sign in here, add your Directory Privacy username under Authorized users, save, then open the site root again.</p>
+<p>Sign in with <code>PANEL_ADMIN_USER</code> and <code>PANEL_ADMIN_PASSWORD</code> from <code>.env</code>. Same login opens the dashboard and this management page.</p>
 </section>
 <?php panelForm('login'); ?>
-<label>Management password <input type="password" name="password" required autocomplete="current-password"></label>
-<button>Sign in to manage</button></form>
+<?php if ($loginNext !== ''): ?><input type="hidden" name="next" value="/"><?php endif; ?>
+<label>Username <input name="username" required autocomplete="username" value="<?= panelEscape(trim(panelEnv('PANEL_ADMIN_USER'))) ?>"></label>
+<label>Password <input type="password" name="password" required autocomplete="current-password"></label>
+<button>Sign in</button></form>
 <?php else: ?>
-<section class="notice<?= $viewerCount === 0 ? ' warn' : '' ?>">
-<p><strong>Open the dashboard:</strong> protect this folder with Directory Privacy, use a username listed under Authorized users, then visit <a href="/">the site root</a>.</p>
-<?php if ($viewerCount === 0): ?>
-<p role="status">No authorized users are saved yet — the dashboard will deny everyone until you add at least one username below and save.</p>
-<?php else: ?>
-<p class="hint"><?= (int) $viewerCount ?> authorized user(s) saved. Username must match Directory Privacy exactly.</p>
-<?php endif; ?>
+<section class="notice">
+<p>Signed in. <a href="/">Open dashboard</a>. Updates download and unzip the latest signed release automatically when you confirm below.</p>
 </section>
 <section class="block">
 <h2>Updates</h2>
@@ -830,7 +971,7 @@ code{font:0.92rem ui-monospace,monospace}a{color:#1a4f9c}
 <input type="hidden" name="installed_release" value="<?= panelEscape($state['active']) ?>">
 <input type="hidden" name="update_version" value="<?= panelEscape($latest['version']) ?>">
 <input type="hidden" name="update_sha256" value="<?= panelEscape($latest['sha256']) ?>">
-<button>Install version <?= panelEscape($latest['version']) ?></button></form>
+<button>Download and install <?= panelEscape($latest['version']) ?></button></form>
 <?php else: ?>
 <p role="status">Up to date. Latest release: <?= panelEscape($latest['version']) ?>.</p>
 <?php endif; ?>
@@ -839,16 +980,16 @@ code{font:0.92rem ui-monospace,monospace}a{color:#1a4f9c}
 <?php panelForm('rollback'); ?><button>Restore previous version</button></form>
 <?php endif; ?>
 </section>
-<h2>Brand and who can open the dashboard</h2>
-<?php panelForm('settings'); panelBrandingFields($state['branding'], $state['users']); ?>
-<button>Save settings</button></form>
+<h2>Branding</h2>
+<?php panelForm('settings'); panelBrandingFields($state['branding']); ?>
+<button>Save branding</button></form>
 <section class="block">
 <h2>Reconnect to Fonitas</h2>
-<p class="hint">Only if Custom Domains issued a new connection key (reconnect / reassign). Paste the new key here. Does not change Authorized users.</p>
+<p class="hint">Only when Custom Domains issues a new connection key. Paste it here or put it in <code>PANEL_CONNECTION_KEY</code> and leave the field empty.</p>
 <?php panelForm('reconnect'); ?>
-<label>New connection key <input type="password" name="key" required autocomplete="off"></label>
+<label>New connection key <input type="password" name="key" autocomplete="off" placeholder="Uses .env when empty"></label>
 <button>Reconnect</button></form>
 </section>
-<p><a href="/">Open dashboard</a> · keep this <code>/setup.php</code> bookmark for settings.</p>
-<?php panelForm('logout'); ?><button>Sign out of management</button></form>
+<p><a href="/">Open dashboard</a></p>
+<?php panelForm('logout'); ?><button>Sign out</button></form>
 <?php endif; ?>

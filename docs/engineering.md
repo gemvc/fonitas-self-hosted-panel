@@ -127,7 +127,7 @@ The current releases give software developers and authorized viewers a read-only
 | | Static ZIP | Branded PHP dashboard (OEM) |
 | --- | --- | --- |
 | Build and entry | `npm run build` → `dist/index.html` → `src/main.tsx` | `npm run build:oem` → `dist-oem/oem.html` → `src/oem.ts`. The installer creates the installed site's `index.php` |
-| Identity | User signs in via the hosted Fonitas portal and approves the organization | The host authenticates the viewer and passes the trusted `REMOTE_USER` server variable. PHP checks the local allowlist |
+| Identity | User signs in via the hosted Fonitas portal and approves the organization | Dashboard and setup use a PHP session after `.env` admin login (`PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD`) |
 | Browser requests | Browser calls the Symfony panel API without cookies. Data reads use a short-lived panel bearer | Browser calls the site's own PHP runtime. PHP calls Symfony with an installation credential |
 | Application scope | An unbound installation lists applications in its organization. A bound installation lists only its selected application | One application selected in Custom Domains and enforced by Symfony |
 | Operator and viewer | Organizations manage domains and keys in the hosted portal. Active organization members can use static sign-in | An administrator uses the hosted portal for domain binding and a separate local management password for `/setup.php`. Viewers use the site's own authentication |
@@ -170,7 +170,7 @@ The static UI uses [`isAllowedPanelOrigin`](../src/origin.ts) before pairing and
 ### OEM trust flow
 
 1. The hosted admin selects a software application for the domain. Symfony validates that it belongs to the selected organization. The registration issues a connection key for the installation. PHP redeems it from the installed site and stores the installation credential. Symfony stores its hash. [Custom Domains page][hosted-domains] · [OEM service][oem-service]
-2. The web server's authentication layer sets `REMOTE_USER`. PHP allows the HTML and JSON views only for exact identities listed by the installer admin. Setup uses its own origin-bound PHP session, management password hash, and form CSRF token. An empty viewer list denies access. Never derive `REMOTE_USER` from an untrusted browser header. [Installer, `panelSession` and `panelRuntime`](../installer/setup.php)
+2. Operators sign in on `/setup.php` with `.env` credentials. That session unlocks the dashboard and management actions (updates, branding, reconnect). [Installer, `panelSession` and `panelRuntime`](../installer/setup.php)
 3. PHP uses the stored exact origin and credential to read the bound application. Symfony checks the active organization and resolves ownership from the installation, regardless of any browser-supplied application identifier. PHP exposes only the fields used by the UI. Reassignment clears credentials and panel sessions. Revocation removes the installation. [OEM service][oem-service] · [Application ownership and summary][panel-applications] · [Installer runtime](../installer/setup.php)
 
 ## API contracts
@@ -301,18 +301,18 @@ The upload contains the three PHP files and the public rewrite configuration. Ke
 
 ### Install the PHP OEM dashboard
 
-1. Check the [published release assets][releases] for `setup.php`. Upload that generated installer to the document root of a dedicated HTTPS site with PHP 8.2 or later, cURL, ZIP, and OpenSSL. Configure `index.php` as the directory index. When installing over the static Fonitas ZIP, the installer recognizes the old `index.html`, moves it to `legacy-index.html` in the private data directory, and creates the PHP entry point. It moves the static entry back if activation or configuration fails. Keep the old `assets/` directory if you need to restore the static version. PHP must be able to write to both directories. An unrelated index file or an existing backup is preserved.
-2. In [Custom Domains][custom-domains], request the exact origin with the intended application, or assign the application to the existing installation. Select **Show connection key**, then open `/setup.php`, paste the key, and choose a separate management password. Keep `setup.php` for settings, reconnect, and updates.
-3. Follow the numbered install copy on `/setup.php`: paste the connection key, choose a management password (for setup only), set brand name, and add at least one **Authorized user**. Optionally upload PNG logo/favicon. Branding images are stored in the private installer directory and survive bundle updates and rollback. Existing installations keep their existing logo URL until a PNG is uploaded. Enable the host's Directory Privacy / HTTP Basic Auth so PHP receives `REMOTE_USER` on `/` and `/index.php`, matching an Authorized user exactly. Confirm that an allowed viewer gets the dashboard and an unlisted identity is denied with the access-help page.
+1. Download `setup.php` and copy [`installer/panel.env.example`](../installer/panel.env.example) to `.env` in the document root of a dedicated HTTPS site (PHP 8.2+, cURL, ZIP, OpenSSL). PHP must be able to write the document root and a private data directory. Prefer denying public reads of `.env` (setup writes an Apache deny rule into `.htaccess` when missing).
+2. In [Custom Domains][custom-domains], request the exact origin with the intended application. Put the connection key in `PANEL_CONNECTION_KEY`, and set `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD` (16+ characters) in `.env`.
+3. Open `/setup.php` and choose **Install latest dashboard from .env**. PHP downloads the signed OEM release, unzips it, creates `index.php`, and activates Fonitas. Sign in later with the same `.env` username and password — that session opens both `/setup.php` and the dashboard. No cPanel Directory Privacy / `REMOTE_USER` list is required.
+4. Optional: set `PANEL_BRAND_NAME`, `PANEL_LANGUAGE`, `PANEL_ACCENT`, `PANEL_SUPPORT_URL` before install, or edit branding after login. Clear `PANEL_CONNECTION_KEY` after a successful install. Keep `setup.php` for updates and reconnect.
 
 | Configuration | Owner and behavior |
 | --- | --- |
-| `PANEL_DATA_DIR` | PHP environment override. Use an absolute path outside the document root, owned by the PHP worker, with mode `0700`. By default, PHP uses a hidden sibling of the document root. Keep this directory across deployments and outside all public web mappings |
-| `PANEL_ORIGIN` | PHP environment override for an HTTPS-terminating proxy (or an exact development origin). Set the exact origin and restrict direct access to the PHP origin server |
-| `APP_ENV` | Process environment. Defaults to `production`. Use `dev` or `development` only for local loopback |
-| `PANEL_ALLOW_LOCALHOST` | Process environment. Defaults to `false`. Together with a development `APP_ENV`, allows `http://localhost` loopback origins via `panelAllowsLocalhost()` |
-| `state.json` | Installer-owned private state. Holds origin, management password hash, the installation credential, branding, permitted identities, and active and previous versions. Setup writes it atomically. Change settings through the management page |
-| Viewer identity | Trusted identity from the host auth module: `REMOTE_USER`, then `REDIRECT_REMOTE_USER`, then `PHP_AUTH_USER` (common on cPanel Directory Privacy / PHP-FPM). Matching against Authorized users is exact. Never trust a browser-supplied header that pretends to be `REMOTE_USER` |
+| `.env` | Document-root file. Source of `PANEL_ADMIN_USER`, `PANEL_ADMIN_PASSWORD`, optional `PANEL_CONNECTION_KEY` / branding / `PANEL_ORIGIN`. Required for install and login |
+| `PANEL_DATA_DIR` | PHP environment override. Absolute path outside the document root, mode `0700`. Default: hidden sibling of the document root |
+| `PANEL_ORIGIN` | Optional exact origin when behind an HTTPS-terminating proxy |
+| `APP_ENV` / `PANEL_ALLOW_LOCALHOST` | Fail-closed loopback gates for local development only |
+| `state.json` | Private installer state: origin, password hash fallback, installation credential, branding, active/previous release ids |
 
 The management page automatically checks the signed release manifest when an administrator opens it. It shows the installed version and any newer release. **Check again** refreshes the result. The ZIP is downloaded only after the administrator selects **Install version**. If the release or installed version changes before confirmation, review the new result and confirm again. Use **Restore previous version** to roll back a successful update. The update replaces the dashboard bundle. To update an older copy of the PHP installer itself, replace `setup.php` with the one from the published assets.
 
@@ -324,10 +324,10 @@ For an expired key or an older request without a key, select **Get connection ke
 | --- | --- |
 | The installer rejects the connection key | In **Custom Domains**, check the exact HTTPS origin and the application binding. Generate a new key if the previous key has expired or been used. |
 | The logo upload asks for a PNG within the limits | Check that the image content is actually PNG. The logo limit is 1 MiB and 2048 pixels per side. The favicon has its own limit of 64 KiB and 256 pixels per side. Both are optional at installation and can be added in setup later. |
-| The dashboard shows **You do not have access to this dashboard** | The PHP viewer guard received an empty or unlisted identity (`REMOTE_USER` / `PHP_AUTH_USER`). The HTML page explains the next steps. Enable Directory Privacy, open `/setup.php` with the management password, and save that exact username under **Authorized users**. |
+| The dashboard redirects to `/setup.php` | Sign in with `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD` from `.env`. There is no Directory Privacy step. |
 | The dashboard opens and the application is unavailable | Check the installation credential, application binding, and backend response. [OEM service][oem-service] |
 
-For the viewer `403`, check that the host authenticates the dashboard request and passes its authenticated identity to PHP as `REMOTE_USER` on both `/` and `/index.php`. If the hosting panel offers **Directory Privacy** or HTTP Basic Auth, confirm that the host forwards the resulting username to PHP. In `/setup.php`, sign in with the installation management password, open **Display and viewer settings**, and save that exact identity in **Authorized users**, one per line. Verify with an allowed identity and a separate unauthenticated or unlisted session. The connection key is used during activation and reconnection. Editing the viewer list does not require reinstalling or issuing another key. [PHP runtime and settings](../installer/setup.php)
+Dashboard and setup share one PHP session after `.env` login. Updates use **Download and install** on `/setup.php` (signed GitHub release). Reconnect only when Custom Domains issues a new `fpk_` key. [PHP runtime and settings](../installer/setup.php)
 
 ### Resume OEM customer sign-in work
 

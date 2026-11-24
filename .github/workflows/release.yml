@@ -110,8 +110,9 @@ jobs:
               -f "ref=refs/tags/$TAG" -f "sha=$RELEASE_COMMIT" --silent
           fi
 
-          assets=(fonitas-self-hosted-panel.zip panel-oem.zip oem-release.json setup.php)
-          if status="$(gh release view "$TAG" --json isDraft,assets --jq '[.isDraft, ((.assets | map(.name) | sort) == (["fonitas-self-hosted-panel.zip", "panel-oem.zip", "oem-release.json", "setup.php"] | sort))] | @tsv')"; then
+          cp installer/panel.env.example panel.env.example
+          assets=(fonitas-self-hosted-panel.zip panel-oem.zip oem-release.json setup.php panel.env.example)
+          if status="$(gh release view "$TAG" --json isDraft,assets --jq '[.isDraft, ((.assets | map(.name) | sort) == (["fonitas-self-hosted-panel.zip", "panel-oem.zip", "oem-release.json", "setup.php", "panel.env.example"] | sort))] | @tsv')"; then
             if [[ "$status" == $'false\ttrue' ]]; then
               exit 0
             fi
