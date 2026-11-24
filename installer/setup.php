@@ -340,7 +340,7 @@ function panelActivate(string $origin, #[SensitiveParameter] string $key): strin
 function panelLatestRelease(): array
 {
     if (!str_contains(PANEL_PUBLIC_KEY, 'BEGIN PUBLIC KEY')) {
-        throw new RuntimeException('Download the signed installer from the release page.');
+        throw new RuntimeException('This setup.php is unsigned (repo source). Upload setup.php from the GitHub release assets (not the installer/ folder in git), then use Check again.');
     }
     [$status, $envelope] = panelHttp(PANEL_RELEASES.'/latest/download/oem-release.json', 16384, redirects: true);
     $signed = json_decode($envelope, true);
