@@ -163,3 +163,7 @@ vite.config.ts.timestamp-*
 /panel-oem.zip
 /oem-release.json
 /setup.php
+
+# macOS
+.DS_Store
+**/.DS_Store
