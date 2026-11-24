@@ -445,6 +445,16 @@ function panelInstalledVersion(string $active): string
     return explode('-', $active, 2)[0];
 }
 
+function panelInstallerSigned(): bool
+{
+    return str_contains(PANEL_PUBLIC_KEY, 'BEGIN PUBLIC KEY');
+}
+
+function panelReleaseSetupUrl(): string
+{
+    return PANEL_RELEASES.'/latest/download/setup.php';
+}
+
 /** @return array{release: ?array{version: string, sha256: string}, error: ?string, expires: int} */
 function panelReleaseStatus(): array
 {
@@ -1106,9 +1116,18 @@ code{font:0.92rem ui-monospace,monospace}a{color:#1a4f9c}
 <section class="notice">
 <p>Signed in. <a href="/">Open dashboard</a>. Updates download and unzip the latest signed release automatically when you confirm below.</p>
 </section>
+<?php if (!panelInstallerSigned()): ?>
+<section class="notice warn" role="status">
+<p><strong>Wrong setup.php on the server.</strong> This file is the unsigned git source, so updates cannot be verified.</p>
+<p>In cPanel File Manager, replace document-root <code>setup.php</code> with the release download (do not upload from your local <code>installer/</code> folder):</p>
+<p><a href="<?= panelEscape(panelReleaseSetupUrl()) ?>" rel="noreferrer"><?= panelEscape(panelReleaseSetupUrl()) ?></a></p>
+<p>After upload, reload this page. You should see installer signed, then use <strong>Check again</strong>.</p>
+</section>
+<?php endif; ?>
 <section class="block">
 <h2>Updates</h2>
 <p>Installed version <strong><?= panelEscape($installedVersion) ?></strong></p>
+<p class="hint">Installer: <?= panelInstallerSigned() ? 'signed (release asset, min '.panelEscape(PANEL_MINIMUM_RELEASE).')' : 'unsigned (repo source — replace from GitHub release)' ?></p>
 <?php if ($latest === null): ?>
 <p role="status">Update check unavailable. <?= panelEscape($releaseStatus['error'] ?? '') ?></p>
 <?php elseif (version_compare($latest['version'], $installedVersion, '>')): ?>
