@@ -20,14 +20,30 @@ function panelEscape(string $value): string
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
-/** Explain the REMOTE_USER viewer gate when the dashboard is opened without access. */
+/**
+ * Viewer identity from the host auth module only (never from a client-forged header).
+ * Apache often sets REMOTE_USER; cPanel Directory Privacy / PHP-FPM often sets PHP_AUTH_USER.
+ */
+function panelViewerIdentity(): string
+{
+    foreach (['REMOTE_USER', 'REDIRECT_REMOTE_USER', 'PHP_AUTH_USER'] as $key) {
+        $value = $_SERVER[$key] ?? '';
+        if (is_string($value) && $value !== '') {
+            return $value;
+        }
+    }
+
+    return '';
+}
+
+/** Explain the viewer gate when the dashboard is opened without access. */
 function panelAccessDenied(?string $identity): never
 {
     http_response_code(403);
     header('Content-Type: text/html; charset=utf-8');
     header('Cache-Control: no-store');
     $who = $identity === null || $identity === ''
-        ? 'Your host did not send a signed-in username to PHP (<code>REMOTE_USER</code> is empty).'
+        ? 'Your host did not send a signed-in username to PHP (no <code>REMOTE_USER</code> / <code>PHP_AUTH_USER</code>).'
         : 'Signed-in as <code>'.panelEscape($identity).'</code>, which is not on the Authorized users list.';
     echo '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<title>Dashboard access</title><style>body{margin:3rem auto;padding:0 1rem;max-width:40rem;font:1rem system-ui;line-height:1.5;color:#172234}';
@@ -35,9 +51,9 @@ function panelAccessDenied(?string $identity): never
     echo '<h1>You do not have access to this dashboard</h1>';
     echo '<p>'.$who.'</p>';
     echo '<p>This page is separate from Fonitas login. Access needs two things:</p><ol>';
-    echo '<li>Password-protect this folder on your host (cPanel <strong>Directory Privacy</strong> / HTTP Basic Auth) so PHP receives <code>REMOTE_USER</code>.</li>';
+    echo '<li>Password-protect this folder (cPanel <strong>Directory Privacy</strong>). When the browser asks for a username/password, that username must reach PHP.</li>';
     echo '<li>Open <a href="/setup.php">/setup.php</a>, sign in with the <strong>management password</strong>, and add that exact username under <strong>Authorized users</strong> (one per line).</li>';
-    echo '</ol><p>Then reload this page and sign in with that host username.</p></html>';
+    echo '</ol><p>Then reload this page and sign in with that host username when the browser prompts.</p></html>';
     exit;
 }
 
@@ -494,8 +510,8 @@ function panelRuntime(array $state, string $directory): never
         exit;
     }
 
-    $identity = $_SERVER['REMOTE_USER'] ?? '';
-    if (!is_string($identity) || $identity === '' || !in_array($identity, $state['users'] ?? [], true)) {
+    $identity = panelViewerIdentity();
+    if ($identity === '' || !in_array($identity, $state['users'] ?? [], true)) {
         panelAccessDenied($identity === '' ? null : $identity);
     }
     $brandAsset = $_GET['brand'] ?? null;
@@ -671,9 +687,9 @@ function panelBrandingFields(array $brand, array $users): void
     }
     echo '</select></label></fieldset>';
     echo '<fieldset class="block"><legend>Who can open the dashboard</legend>';
-    echo '<p class="hint">The dashboard is <strong>not</strong> opened with your Fonitas account. Your host must password-protect this folder (cPanel <strong>Directory Privacy</strong>), then list those usernames here — exact match, one per line.</p>';
+    echo '<p class="hint">The dashboard is <strong>not</strong> opened with your Fonitas account. Enable cPanel <strong>Directory Privacy</strong> on this folder, then list those usernames here — exact match, one per line. PHP reads <code>REMOTE_USER</code> or <code>PHP_AUTH_USER</code>.</p>';
     echo '<label>Authorized users <textarea name="users" rows="5" maxlength="8192" placeholder="alice&#10;bob">'.panelEscape(implode("\n", $users)).'</textarea></label>';
-    echo '<p class="hint">Empty list = nobody can open the dashboard. Management of this page still uses the management password below / above.</p></fieldset>';
+    echo '<p class="hint">Empty list = nobody can open the dashboard. This <code>/setup.php</code> page still uses the management password only.</p></fieldset>';
 }
 
 function panelForm(string $action): void
