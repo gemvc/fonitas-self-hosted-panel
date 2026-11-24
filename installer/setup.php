@@ -242,6 +242,9 @@ function panelSave(string $directory, array $state): void
 function panelHttp(string $url, int $limit, array $headers = [], ?array $body = null, bool $redirects = false): array
 {
     $curl = curl_init($url);
+    if ($curl === false) {
+        throw new RuntimeException('The remote service could not be reached.');
+    }
     $data = '';
     curl_setopt_array($curl, [
         CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
@@ -252,7 +255,7 @@ function panelHttp(string $url, int $limit, array $headers = [], ?array $body = 
         CURLOPT_TIMEOUT => 20,
         CURLOPT_HTTPHEADER => $headers,
         CURLOPT_USERAGENT => 'PanelSetup',
-        CURLOPT_WRITEFUNCTION => static function ($handle, string $bytes) use (&$data, $limit): int {
+        CURLOPT_WRITEFUNCTION => static function ($_handle, string $bytes) use (&$data, $limit): int {
             if (strlen($data) + strlen($bytes) > $limit) {
                 return 0;
             }
@@ -280,7 +283,8 @@ function panelActivate(string $origin, #[SensitiveParameter] string $key): strin
         throw new RuntimeException('Enter the current one-time connection key.');
     }
     [$status, $body] = panelHttp(PANEL_API.'/activate', 8192, ['Origin: '.$origin, 'Content-Type: application/json'], ['connection_key' => $key]);
-    $token = json_decode($body, true)['data']['installation_token'] ?? '';
+    $payload = json_decode($body, true);
+    $token = is_array($payload) ? ($payload['data']['installation_token'] ?? '') : '';
     if ($status !== 200 || !is_string($token) || !preg_match('/\Afpi_[0-9a-f]{64}\z/', $token)) {
         throw new RuntimeException('Connection key rejected. Check that the domain is linked to an application and the key is current.');
     }
@@ -296,12 +300,18 @@ function panelLatestRelease(): array
     }
     [$status, $envelope] = panelHttp(PANEL_RELEASES.'/latest/download/oem-release.json', 16384, redirects: true);
     $signed = json_decode($envelope, true);
+    if (!is_array($signed)) {
+        throw new RuntimeException('The release manifest could not be verified.');
+    }
     $manifest = base64_decode(is_string($signed['manifest'] ?? null) ? $signed['manifest'] : '', true);
     $signature = base64_decode(is_string($signed['signature'] ?? null) ? $signed['signature'] : '', true);
     if ($status !== 200 || !$manifest || !$signature || openssl_verify($manifest, $signature, PANEL_PUBLIC_KEY, OPENSSL_ALGO_SHA256) !== 1) {
         throw new RuntimeException('The release manifest could not be verified.');
     }
     $release = json_decode($manifest, true);
+    if (!is_array($release)) {
+        throw new RuntimeException('The release manifest is invalid.');
+    }
     $version = $release['version'] ?? '';
     $hash = $release['sha256'] ?? '';
     if (!is_string($version) || !preg_match('/\A(?:0|[1-9][0-9]{0,7})(?:\.(?:0|[1-9][0-9]{0,7})){2}\z/', $version)
@@ -495,16 +505,6 @@ function panelBranding(array $previous): array
     return $branding + $previous;
 }
 
-function panelUsers(): array
-{
-    $list = panelField('users');
-    if (strlen($list) > 8192) {
-        throw new RuntimeException('The list of authorized users is too long.');
-    }
-
-    return array_values(array_unique(array_filter(array_map('trim', preg_split('/\R/', $list) ?: []))));
-}
-
 function panelInstallEntry(): bool
 {
     $entry = __DIR__.'/index.php';
@@ -590,8 +590,10 @@ function panelRuntime(array $state, string $directory): never
     if ($view === 'application') {
         try {
             [$status, $body] = panelHttp(PANEL_API.'/application', 16384, ['Origin: '.$state['origin'], 'Authorization: Bearer '.$state['credential']]);
-            $application = json_decode($body, true)['data']['application'] ?? [];
-            if ($status !== 200 || !is_string($application['name'] ?? null) || !is_string($application['status'] ?? null)) {
+            $payload = json_decode($body, true);
+            $application = is_array($payload) ? ($payload['data']['application'] ?? null) : null;
+            if ($status !== 200 || !is_array($application)
+                || !is_string($application['name'] ?? null) || !is_string($application['status'] ?? null)) {
                 panelFail(503, 'Application unavailable.');
             }
             panelJson(['name' => $application['name'], 'status' => $application['status']]);
@@ -847,6 +849,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
         panelFail(409, 'Another management operation is in progress. Try again shortly.');
     }
+    $action = '';
     try {
         $action = panelField('action');
         panelAction($directory, $origin, panelState($directory), $action);
@@ -865,7 +868,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         header('Location: /setup.php'.($action === 'check-update' ? '' : '?saved=1'), true, 303);
         exit;
     } catch (RuntimeException $exception) {
-        if (in_array($action ?? '', ['install', 'install-env', 'settings'], true)) {
+        if (in_array($action, ['install', 'install-env', 'settings'], true)) {
             panelPruneBrandImages($directory, panelState($directory)['branding'] ?? []);
         }
         $error = $exception->getMessage();
@@ -876,6 +879,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 $admin = $state !== [] && panelIsAdmin();
 $envReady = panelEnvReady();
 $envHasKey = trim(panelEnv('PANEL_CONNECTION_KEY')) !== '';
+$installedVersion = '';
+/** @var array{release: ?array{version: string, sha256: string}, error: ?string, expires?: int} $releaseStatus */
+$releaseStatus = ['release' => null, 'error' => null];
+/** @var ?array{version: string, sha256: string} $latest */
+$latest = null;
 if ($admin) {
     $state = panelState($directory);
     $installedVersion = panelInstalledVersion($state['active']);
@@ -887,6 +895,7 @@ header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; 
 ?>
 <!doctype html>
 <html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dashboard setup</title>
@@ -905,6 +914,8 @@ button{font:inherit;padding:.55rem .9rem;margin:.35rem .5rem .35rem 0;cursor:poi
 [role=alert]{color:#aa261c;font-weight:550}[role=status].ok{color:#0f6b3c}
 code{font:0.92rem ui-monospace,monospace}a{color:#1a4f9c}
 </style>
+</head>
+<body>
 <h1>Dashboard setup</h1>
 <p class="lead">Installation for <strong><?= panelEscape($origin) ?></strong>. Login, install, and updates use <code>.env</code> in this folder — no cPanel Directory Privacy.</p>
 <?php if ($error !== ''): ?><p role="alert"><?= panelEscape($error) ?></p><?php endif; ?>
@@ -981,7 +992,11 @@ code{font:0.92rem ui-monospace,monospace}a{color:#1a4f9c}
 <?php endif; ?>
 </section>
 <h2>Branding</h2>
-<?php panelForm('settings'); panelBrandingFields($state['branding']); ?>
+<?php
+$branding = is_array($state['branding'] ?? null) ? $state['branding'] : ['name' => '', 'logo' => '', 'accent' => '#2858b8', 'language' => 'en', 'support' => ''];
+panelForm('settings');
+panelBrandingFields($branding);
+?>
 <button>Save branding</button></form>
 <section class="block">
 <h2>Reconnect to Fonitas</h2>
@@ -993,3 +1008,5 @@ code{font:0.92rem ui-monospace,monospace}a{color:#1a4f9c}
 <p><a href="/">Open dashboard</a></p>
 <?php panelForm('logout'); ?><button>Sign out</button></form>
 <?php endif; ?>
+</body>
+</html>
