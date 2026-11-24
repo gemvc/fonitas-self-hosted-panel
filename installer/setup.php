@@ -134,10 +134,20 @@ function panelIsLoopbackHost(string $host): bool
     return $normalized === 'localhost' || $normalized === '127.0.0.1' || $normalized === '::1';
 }
 
+function panelRequestIsHttps(): bool
+{
+    if (in_array(strtolower((string) ($_SERVER['HTTPS'] ?? '')), ['on', '1'], true)) {
+        return true;
+    }
+    $forwarded = strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+
+    return $forwarded === 'https' || str_starts_with($forwarded, 'https,');
+}
+
 function panelOrigin(): string
 {
     panelLoadEnv();
-    $https = in_array(strtolower($_SERVER['HTTPS'] ?? ''), ['on', '1'], true);
+    $https = panelRequestIsHttps();
     $authority = strtolower($_SERVER['HTTP_HOST'] ?? '');
     $authority = preg_replace($https ? '~:443\z~' : '~:80\z~', '', $authority) ?? $authority;
     $configured = panelEnv('PANEL_ORIGIN');
@@ -148,7 +158,7 @@ function panelOrigin(): string
     } elseif (panelAllowsLocalhost()) {
         $origin = 'http://'.$authority;
     } else {
-        panelFail(400, 'Open this panel through its configured HTTPS address.');
+        panelFail(400, 'Open this panel through its configured HTTPS address (or set PANEL_ORIGIN in .env).');
     }
 
     if (strlen($origin) > 268 || preg_match('~\A(https|http)://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?\z~', $origin, $parts) !== 1) {
@@ -629,17 +639,29 @@ function panelJson(array $data): never
 
 function panelSession(string $origin): void
 {
-    $https = in_array(strtolower($_SERVER['HTTPS'] ?? ''), ['on', '1'], true)
-        || str_starts_with($origin, 'https://');
+    $https = panelRequestIsHttps() || str_starts_with($origin, 'https://');
     session_name('PanelSetup');
-    session_start([
-        'use_strict_mode' => 1, 'use_only_cookies' => 1, 'cookie_secure' => $https, 'cookie_httponly' => true,
-        'cookie_samesite' => 'Strict', 'cookie_path' => '/', 'cache_limiter' => '',
-    ]);
+    $path = session_save_path();
+    if (is_string($path) && $path !== '' && !is_dir($path) && !@mkdir($path, 0700, true) && !is_dir($path)) {
+        panelFail(503, 'PHP session storage is not writable on this host. Check session.save_path.');
+    }
+    if (!session_start([
+        'use_strict_mode' => 1,
+        'use_only_cookies' => 1,
+        'cookie_secure' => $https,
+        'cookie_httponly' => true,
+        'cookie_samesite' => 'Lax',
+        'cookie_path' => '/',
+        'cache_limiter' => '',
+    ])) {
+        panelFail(503, 'PHP could not start a session. Check session.save_path permissions.');
+    }
     if (($_SESSION['origin'] ?? null) !== $origin) {
         $_SESSION = ['origin' => $origin];
     }
-    $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
+    if (!isset($_SESSION['csrf']) || !is_string($_SESSION['csrf']) || strlen($_SESSION['csrf']) < 32) {
+        $_SESSION['csrf'] = bin2hex(random_bytes(32));
+    }
 }
 
 function panelInstallFromValues(
@@ -842,38 +864,42 @@ if ($runtime) {
 }
 $error = '';
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
-    if (!hash_equals($_SESSION['csrf'], panelField('csrf'))) {
-        panelFail(403, 'Reload the management page and try again.');
-    }
-    $lock = fopen($directory.'/manage.lock', 'c');
-    if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
-        panelFail(409, 'Another management operation is in progress. Try again shortly.');
-    }
-    $action = '';
-    try {
-        $action = panelField('action');
-        panelAction($directory, $origin, panelState($directory), $action);
-        if (in_array($action, ['install', 'install-env', 'settings'], true)) {
-            panelPruneBrandImages($directory, panelState($directory)['branding'] ?? []);
+    $csrfPosted = panelField('csrf');
+    $csrfSession = is_string($_SESSION['csrf'] ?? null) ? $_SESSION['csrf'] : '';
+    if ($csrfPosted === '' || $csrfSession === '' || !hash_equals($csrfSession, $csrfPosted)) {
+        $_SESSION['csrf'] = bin2hex(random_bytes(32));
+        $error = 'Your session expired or cookies were blocked. Reload this page and try again. If it keeps failing, set PANEL_ORIGIN in .env to this exact HTTPS address and confirm the browser stores cookies for this site.';
+    } else {
+        $lock = fopen($directory.'/manage.lock', 'c');
+        if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
+            panelFail(409, 'Another management operation is in progress. Try again shortly.');
         }
-        $next = panelField('next');
-        if ($action === 'login' && $next === '/') {
-            header('Location: /', true, 303);
+        $action = '';
+        try {
+            $action = panelField('action');
+            panelAction($directory, $origin, panelState($directory), $action);
+            if (in_array($action, ['install', 'install-env', 'settings'], true)) {
+                panelPruneBrandImages($directory, panelState($directory)['branding'] ?? []);
+            }
+            $next = panelField('next');
+            if ($action === 'login' && $next === '/') {
+                header('Location: /', true, 303);
+                exit;
+            }
+            if ($action === 'install-env' || $action === 'install') {
+                header('Location: /setup.php?saved=1', true, 303);
+                exit;
+            }
+            header('Location: /setup.php'.($action === 'check-update' ? '' : '?saved=1'), true, 303);
             exit;
+        } catch (RuntimeException $exception) {
+            if (in_array($action, ['install', 'install-env', 'settings'], true)) {
+                panelPruneBrandImages($directory, panelState($directory)['branding'] ?? []);
+            }
+            $error = $exception->getMessage();
+        } finally {
+            fclose($lock);
         }
-        if ($action === 'install-env' || $action === 'install') {
-            header('Location: /setup.php?saved=1', true, 303);
-            exit;
-        }
-        header('Location: /setup.php'.($action === 'check-update' ? '' : '?saved=1'), true, 303);
-        exit;
-    } catch (RuntimeException $exception) {
-        if (in_array($action, ['install', 'install-env', 'settings'], true)) {
-            panelPruneBrandImages($directory, panelState($directory)['branding'] ?? []);
-        }
-        $error = $exception->getMessage();
-    } finally {
-        fclose($lock);
     }
 }
 $admin = $state !== [] && panelIsAdmin();
