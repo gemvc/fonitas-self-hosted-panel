@@ -487,16 +487,37 @@ function panelBrandImage(string $directory, string $field, int $maxBytes, int $m
     }
     if (($file['error'] ?? null) !== UPLOAD_ERR_OK || !is_string($file['tmp_name'] ?? null)
         || !is_uploaded_file($file['tmp_name'])) {
-        throw new RuntimeException('Could not upload the '.$field.' PNG.');
+        throw new RuntimeException('Could not upload the '.$field.' image.');
     }
 
     $bytes = file_get_contents($file['tmp_name'], length: $maxBytes + 1);
-    $image = $bytes === false ? false : @getimagesizefromstring($bytes);
-    if ($bytes === false || strlen($bytes) > $maxBytes || $image === false || $image[2] !== IMAGETYPE_PNG
-        || $image[0] < 1 || $image[1] < 1 || $image[0] > $maxSide || $image[1] > $maxSide) {
-        throw new RuntimeException('Upload a PNG for the '.$field.' that meets the size and dimension limits.');
+    if ($bytes === false || strlen($bytes) > $maxBytes) {
+        throw new RuntimeException('Upload a smaller image for the '.$field.' (max '.$maxBytes.' bytes).');
     }
-    $name = 'brand-'.hash('sha256', $bytes).'.png';
+    $image = @getimagesizefromstring($bytes);
+    $isPng = is_array($image) && ($image[2] ?? null) === IMAGETYPE_PNG;
+    $isIco = $field === 'favicon' && (
+        (is_array($image) && defined('IMAGETYPE_ICO') && ($image[2] ?? null) === IMAGETYPE_ICO)
+        || str_starts_with($bytes, "\x00\x00\x01\x00")
+    );
+    if (!$isPng && !$isIco) {
+        throw new RuntimeException($field === 'favicon'
+            ? 'Favicon must be a PNG or ICO within the size and dimension limits.'
+            : 'Logo must be a PNG within the size and dimension limits.');
+    }
+    if ($isPng) {
+        if (!is_array($image) || $image[0] < 1 || $image[1] < 1 || $image[0] > $maxSide || $image[1] > $maxSide) {
+            throw new RuntimeException('Upload a PNG for the '.$field.' that meets the size and dimension limits.');
+        }
+        $extension = 'png';
+    } else {
+        if (is_array($image) && isset($image[0], $image[1])
+            && ($image[0] < 1 || $image[1] < 1 || $image[0] > $maxSide || $image[1] > $maxSide)) {
+            throw new RuntimeException('Favicon ICO must be at most '.$maxSide.' × '.$maxSide.' pixels.');
+        }
+        $extension = 'ico';
+    }
+    $name = 'brand-'.hash('sha256', $bytes).'.'.$extension;
     $path = $directory.'/'.$name;
     if (!is_file($path)) {
         $temporary = tempnam($directory, '.brand-');
@@ -532,9 +553,9 @@ function panelBrandImages(string $directory, array $branding): array
 function panelPruneBrandImages(string $directory, array $branding): void
 {
     $selected = [$branding['logo_file'] ?? null, $branding['favicon_file'] ?? null];
-    foreach (glob($directory.'/brand-*.png') ?: [] as $path) {
+    foreach ([...glob($directory.'/brand-*.png') ?: [], ...glob($directory.'/brand-*.ico') ?: []] as $path) {
         $name = basename($path);
-        if (preg_match('/\Abrand-[a-f0-9]{64}\.png\z/', $name) && !in_array($name, $selected, true)) {
+        if (preg_match('/\Abrand-[a-f0-9]{64}\.(?:png|ico)\z/', $name) && !in_array($name, $selected, true)) {
             @unlink($path);
         }
     }
@@ -633,10 +654,10 @@ function panelRuntime(array $state, string $directory): never
             panelFail(404, 'File unavailable.');
         }
         $name = $state['branding'][$brandAsset.'_file'] ?? '';
-        if (!is_string($name) || !preg_match('/\Abrand-[a-f0-9]{64}\.png\z/', $name) || !is_file($directory.'/'.$name)) {
+        if (!is_string($name) || !preg_match('/\Abrand-[a-f0-9]{64}\.(?:png|ico)\z/', $name) || !is_file($directory.'/'.$name)) {
             panelFail(404, 'File unavailable.');
         }
-        header('Content-Type: image/png');
+        header('Content-Type: '.str_ends_with($name, '.ico') ? 'image/x-icon' : 'image/png');
         readfile($directory.'/'.$name);
         exit;
     }
@@ -934,10 +955,10 @@ function panelBrandingFields(array $brand): void
 {
     echo '<fieldset class="block"><legend>Branding</legend>';
     echo '<label>Brand name <input name="name" required maxlength="120" value="'.panelEscape($brand['name']).'"></label>';
-    echo '<label>Logo PNG <input name="logo" type="file" accept="image/png"></label>';
+    echo '<label>Logo PNG <input name="logo" type="file" accept="image/png,.png"></label>';
     echo '<p class="hint">Optional. PNG up to 1 MiB, 2048 × 2048 pixels.</p>';
-    echo '<label>Favicon PNG <input name="favicon" type="file" accept="image/png"></label>';
-    echo '<p class="hint">Optional. PNG up to 64 KiB, 256 × 256 pixels.</p>';
+    echo '<label>Favicon <input name="favicon" type="file" accept="image/png,image/x-icon,image/vnd.microsoft.icon,.png,.ico"></label>';
+    echo '<p class="hint">Optional. PNG or ICO up to 64 KiB, 256 × 256 pixels.</p>';
     echo '<label>Support HTTPS URL <input name="support" type="url" value="'.panelEscape($brand['support']).'"></label>';
     echo '<label>Accent <input name="accent" type="color" value="'.panelEscape($brand['accent']).'"></label>';
     echo '<label>Language <select name="language">';

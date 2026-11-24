@@ -38,7 +38,6 @@ async function showDashboard() {
     if (branding.favicon) {
       const icon = document.createElement("link");
       icon.rel = "icon";
-      icon.type = "image/png";
       icon.href = branding.favicon;
       document.head.append(icon);
     }

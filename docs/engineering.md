@@ -323,7 +323,7 @@ For an expired key or an older request without a key, select **Get connection ke
 | Symptom | What to check |
 | --- | --- |
 | The installer rejects the connection key | In **Custom Domains**, check the exact HTTPS origin and the application binding. Generate a new key if the previous key has expired or been used. |
-| The logo upload asks for a PNG within the limits | Check that the image content is actually PNG. The logo limit is 1 MiB and 2048 pixels per side. The favicon has its own limit of 64 KiB and 256 pixels per side. Both are optional at installation and can be added in setup later. |
+| The logo upload asks for a PNG within the limits | Logo must be PNG (1 MiB, 2048 × 2048). Favicon may be PNG or ICO (64 KiB, 256 × 256). Both are optional and can be set later on `/setup.php`. Replace signed `setup.php` from the latest release if the form still says “Favicon PNG” only. |
 | The dashboard redirects to `/setup.php` | Sign in with `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD` from `.env`. There is no Directory Privacy step. |
 | Sign-in says the form expired / cookies were blocked | Confirm `PANEL_ORIGIN` matches the browser HTTPS address. Clear site cookies or use a private window, reload once, then retry. Replace `setup.php` with the latest release asset so sessions use the private data directory and double-submit CSRF. |
 | Sign-in rejects username / password | `PANEL_ADMIN_PASSWORD` must be 16–72 characters in document-root `.env`. Prefer unquoted values. The page error now reports whether the username or password length mismatches `.env`. Document-root `.env` overrides empty host env vars. |
