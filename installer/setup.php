@@ -645,9 +645,7 @@ function panelRuntime(array $state, string $directory): never
         exit;
     }
 
-    if (!panelIsAdmin()) {
-        panelRequireLoginRedirect();
-    }
+    // Public: brand images for the customer shell (no admin session).
     $brandAsset = $_GET['brand'] ?? null;
     if ($brandAsset !== null) {
         if (!in_array($brandAsset, ['logo', 'favicon'], true)) {
@@ -661,22 +659,27 @@ function panelRuntime(array $state, string $directory): never
         readfile($directory.'/'.$name);
         exit;
     }
+
     $view = $_GET['view'] ?? null;
-    if ($view === 'application') {
-        try {
-            [$status, $body] = panelHttp(PANEL_API.'/application', 16384, ['Origin: '.$state['origin'], 'Authorization: Bearer '.$state['credential']]);
-            $payload = json_decode($body, true);
-            $application = is_array($payload) ? ($payload['data']['application'] ?? null) : null;
-            if ($status !== 200 || !is_array($application)
-                || !is_string($application['name'] ?? null) || !is_string($application['status'] ?? null)) {
+    // Installation-credential JSON stays admin-only; buyers use Identity from the React shell.
+    if ($view === 'application' || $view === 'branding') {
+        if (!panelIsAdmin()) {
+            panelRequireLoginRedirect();
+        }
+        if ($view === 'application') {
+            try {
+                [$status, $body] = panelHttp(PANEL_API.'/application', 16384, ['Origin: '.$state['origin'], 'Authorization: Bearer '.$state['credential']]);
+                $payload = json_decode($body, true);
+                $application = is_array($payload) ? ($payload['data']['application'] ?? null) : null;
+                if ($status !== 200 || !is_array($application)
+                    || !is_string($application['name'] ?? null) || !is_string($application['status'] ?? null)) {
+                    panelFail(503, 'Application unavailable.');
+                }
+                panelJson(['name' => $application['name'], 'status' => $application['status']]);
+            } catch (RuntimeException) {
                 panelFail(503, 'Application unavailable.');
             }
-            panelJson(['name' => $application['name'], 'status' => $application['status']]);
-        } catch (RuntimeException) {
-            panelFail(503, 'Application unavailable.');
         }
-    }
-    if ($view === 'branding') {
         $branding = $state['branding'];
         foreach (['logo', 'favicon'] as $field) {
             if (isset($branding[$field.'_file'])) {
@@ -686,11 +689,13 @@ function panelRuntime(array $state, string $directory): never
         }
         panelJson($branding);
     }
+
+    // Public customer React shell (login / register). Management stays on /setup.php.
     $html = @file_get_contents($directory.'/'.$state['active'].'/oem.html');
     if ($view !== null || $html === false) {
         panelFail(404, 'Dashboard unavailable.');
     }
-    header("Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
+    header("Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' https://api.fonitas.com; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
     echo str_replace('"/assets/', '"/index.php?asset='.$state['active'].'/assets/', $html);
     exit;
 }
@@ -1135,7 +1140,7 @@ code{font:0.92rem ui-monospace,monospace}a{color:#1a4f9c}
 <button>Sign in</button></form>
 <?php else: ?>
 <section class="notice">
-<p>Signed in. <a href="/">Open dashboard</a>. Updates download and unzip the latest signed release automatically when you confirm below.</p>
+<p>Signed in. <a href="/">Open customer dashboard</a> (public login / register). This page is admin-only for updates and branding.</p>
 </section>
 <?php if (!panelInstallerSigned()): ?>
 <section class="notice warn" role="status">

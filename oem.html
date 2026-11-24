@@ -4,20 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
-    <title>Application dashboard</title>
+    <title>Dashboard</title>
   </head>
   <body>
-    <main id="dashboard" class="workspace" hidden>
-      <header class="bar">
-        <div class="actions"><img id="logo" width="36" height="36" alt="" hidden /><strong id="brand"></strong></div>
-        <a id="support" hidden></a>
-      </header>
-      <p id="message" role="status"></p>
-      <section id="application" class="card" hidden>
-        <h1 id="application-name"></h1>
-        <p id="application-status"></p>
-      </section>
-    </main>
-    <script type="module" src="/src/oem.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

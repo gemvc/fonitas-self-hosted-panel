@@ -11,7 +11,7 @@ This handbook is the repository's reference for architecture, API discovery, dev
 | Change the customer PHP API or installation validation | This repository, server-side PHP | [customer/public/index.php](../customer/public/index.php), [customer/src](../customer/src/) |
 | Change allowed installation origins (HTTPS domain / localhost policy) | This repository, and Symfony origin validation | [origin.ts](../src/origin.ts), [installer `panelOrigin`](../installer/setup.php), Symfony [`DeveloperPanelOriginPolicy`][panels] |
 | Change local Docker development images | This repository | [Dockerfile](../Dockerfile), [docker-compose.yml](../docker-compose.yml) |
-| Change OEM branding or the application summary | This repository, HTML and TypeScript | [oem.html](../oem.html), [oem.ts](../src/oem.ts), shared [styles.css](../src/styles.css) |
+| Change the installed customer shell (OEM ZIP) | This repository, React and TypeScript | [oem.html](../oem.html) builds [main.tsx](../src/main.tsx); legacy status viewer [oem.ts](../src/oem.ts) is unused in new releases |
 | Change OEM setup, configuration, access, or updates | This repository, server-side PHP | [installer/setup.php](../installer/setup.php), especially `panelAction`, `panelRuntime`, `panelLatestRelease`, and `panelStageRelease` |
 | Change the organization admin's domain workflow | Hosted developer portal | [Custom Domains page][hosted-domains] |
 | Change hosted sign-in consent or return to the custom domain | Hosted developer portal and Symfony | [Hosted consent][hosted-consent], [session controller][session-controller] |
@@ -126,11 +126,11 @@ The current releases give software developers and authorized viewers a read-only
 
 | | Static ZIP | Branded PHP dashboard (OEM) |
 | --- | --- | --- |
-| Build and entry | `npm run build` → `dist/index.html` → `src/main.tsx` | `npm run build:oem` → `dist-oem/oem.html` → `src/oem.ts`. The installer creates the installed site's `index.php` |
-| Identity | User signs in via the hosted Fonitas portal and approves the organization | Dashboard and setup use a PHP session after `.env` admin login (`PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD`) |
-| Browser requests | Browser calls the Symfony panel API without cookies. Data reads use a short-lived panel bearer | Browser calls the site's own PHP runtime. PHP calls Symfony with an installation credential |
-| Application scope | An unbound installation lists applications in its organization. A bound installation lists only its selected application | One application selected in Custom Domains and enforced by Symfony |
-| Operator and viewer | Organizations manage domains and keys in the hosted portal. Active organization members can use static sign-in | An administrator uses the hosted portal for domain binding and a separate local management password for `/setup.php`. Viewers use the site's own authentication |
+| Build and entry | `npm run build` → `dist/index.html` → `src/main.tsx` | `npm run build:oem` → `dist-oem/oem.html` → same `src/main.tsx` customer shell. The installer creates the installed site's `index.php` |
+| Identity | Buyers register / sign in on-origin (application Identity tenant). Optional `?setup=1` pairing for static installs | Same customer login / register on `/`. Admin management uses `.env` login on `/setup.php` only (`PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD`) |
+| Browser requests | Browser calls the Symfony panel / Identity APIs | Customer UI calls Identity at `api.fonitas.com`. PHP serves the shell and brand assets without an admin session; installation-credential JSON views stay admin-only |
+| Application scope | An unbound installation lists applications in its organization. A bound installation lists only its selected application | One application selected in Custom Domains; Identity tenant resolved from installation `Origin` |
+| Operator and viewer | Organizations manage domains and keys in the hosted portal | Administrators manage updates / branding on `/setup.php`. Buyers use the public customer shell on `/` |
 
 `SoftwareApplication` represents the software shown in the dashboard. The binding uses its public UUID. Application name and status come from Symfony. OEM brand name, logo, favicon, accent, language, support URL, and permitted viewers are local configuration. Current dashboard routes provide an application summary. Customer licensing, billing, and support views are part of the [target product direction](#product-direction-for-the-oem-dashboard).
 
@@ -170,8 +170,8 @@ The static UI uses [`isAllowedPanelOrigin`](../src/origin.ts) before pairing and
 ### OEM trust flow
 
 1. The hosted admin selects a software application for the domain. Symfony validates that it belongs to the selected organization. The registration issues a connection key for the installation. PHP redeems it from the installed site and stores the installation credential. Symfony stores its hash. [Custom Domains page][hosted-domains] · [OEM service][oem-service]
-2. Operators sign in on `/setup.php` with `.env` credentials. That session unlocks the dashboard and management actions (updates, branding, reconnect). [Installer, `panelSession` and `panelRuntime`](../installer/setup.php)
-3. PHP uses the stored exact origin and credential to read the bound application. Symfony checks the active organization and resolves ownership from the installation, regardless of any browser-supplied application identifier. PHP exposes only the fields used by the UI. Reassignment clears credentials and panel sessions. Revocation removes the installation. [OEM service][oem-service] · [Application ownership and summary][panel-applications] · [Installer runtime](../installer/setup.php)
+2. Operators sign in on `/setup.php` with `.env` credentials for management only (updates, branding, reconnect). The public site root serves the customer login / register shell without that session. [Installer, `panelSession` and `panelRuntime`](../installer/setup.php)
+3. PHP keeps the installation credential for admin JSON and activation. Buyers resolve the application Identity tenant from `Origin` via Symfony. Reassignment clears credentials. Revocation removes the installation. [OEM service][oem-service] · [Application ownership and summary][panel-applications] · [Installer runtime](../installer/setup.php)
 
 ## API contracts
 
@@ -324,7 +324,8 @@ For an expired key or an older request without a key, select **Get connection ke
 | --- | --- |
 | The installer rejects the connection key | In **Custom Domains**, check the exact HTTPS origin and the application binding. Generate a new key if the previous key has expired or been used. |
 | The logo upload asks for a PNG within the limits | Logo must be PNG (1 MiB, 2048 × 2048). Favicon may be PNG or ICO (64 KiB, 256 × 256). Both are optional and can be set later on `/setup.php`. Replace signed `setup.php` from the latest release if the form still says “Favicon PNG” only. |
-| The dashboard redirects to `/setup.php` | Sign in with `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD` from `.env`. There is no Directory Privacy step. |
+| `/` shows setup login instead of customer login / register | Install a release that packages the customer shell and serves `/` publicly (v0.4.22+). Admin login belongs only on `/setup.php`. Use **Download and install** after replacing signed `setup.php`. |
+| Admin needs updates / branding | Open `/setup.php` and sign in with `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASSWORD` from `.env`. |
 | Sign-in says the form expired / cookies were blocked | Confirm `PANEL_ORIGIN` matches the browser HTTPS address. Clear site cookies or use a private window, reload once, then retry. Replace `setup.php` with the latest release asset so sessions use the private data directory and double-submit CSRF. |
 | Sign-in rejects username / password | `PANEL_ADMIN_PASSWORD` must be 16–72 characters in document-root `.env`. Prefer unquoted values. The page error now reports whether the username or password length mismatches `.env`. Document-root `.env` overrides empty host env vars. |
 | Update check unavailable / unsigned installer | Document-root `setup.php` must be the **release asset** (public key embedded). Do not upload `installer/setup.php` from git. Download `setup.php` from the latest GitHub release, replace the file, sign in, then **Check again** / **Download and install**. |
