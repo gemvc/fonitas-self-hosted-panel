@@ -2,9 +2,14 @@ import { StrictMode, useCallback, useEffect, useState, type FormEvent } from "re
 import { createRoot } from "react-dom/client";
 import { createLocalCustomerSession, isLocalCustomerToken } from "./customer-session";
 import { GuestBuy } from "./guest-buy";
-import { IdentityApiError, registerIdentityUser } from "./identity-api";
+import { IdentityApiError, loginIdentityUser, registerIdentityUser } from "./identity-api";
 import { messages, type Language } from "./locale";
-import { clearLocalMe, markVerificationEmailPending, rememberLocalMe } from "./panel-me";
+import {
+  clearLocalMe,
+  clearVerificationEmailPending,
+  markVerificationEmailPending,
+  rememberLocalMe,
+} from "./panel-me";
 import { panelRequest, type PanelSession } from "./panel-login";
 import { isAllowedPanelOrigin } from "./origin";
 import { Workspace } from "./workspace";
@@ -79,13 +84,27 @@ function Panel() {
     setBusy(true);
     setSignedOut(false);
     try {
-      const displayName = authMode === "register" && name ? name : email.split("@")[0] || email;
+      let displayName = authMode === "register" && name ? name : email.split("@")[0] || email;
       let verified = false;
       if (authMode === "register") {
         // Creates the Identity user and dispatches the verification email on Fonitas.
         const registered = await registerIdentityUser({ displayName, email, password });
+        displayName = registered.display_name || displayName;
         verified = registered.email_verified;
         if (!verified) markVerificationEmailPending();
+        else clearVerificationEmailPending();
+      } else {
+        // Sign-in must hit Identity so already-verified buyers are not stuck on the gate
+        // (local sessions used to force email_verified=false, and resend no-ops when verified).
+        const loggedIn = await loginIdentityUser({ email, password });
+        if (loggedIn.mfa_required) {
+          setAuthError("unavailable");
+          return;
+        }
+        displayName = loggedIn.display_name || displayName;
+        verified = loggedIn.email_verified;
+        if (!verified) markVerificationEmailPending();
+        else clearVerificationEmailPending();
       }
       const next = createLocalCustomerSession(displayName, email);
       if (verified) next.me.email_verified = true;
@@ -95,10 +114,13 @@ function Panel() {
       event.currentTarget.reset();
     } catch (cause) {
       if (cause instanceof IdentityApiError) {
-        if (cause.message === "email_taken") setAuthError("emailTaken");
-        else if (cause.message === "validation") setAuthError("registerInvalid");
-        else if (cause.message === "register_failed") setAuthError("registerFailed");
+        if (cause.message === "auth_failed") setAuthError("authFailed");
+        else if (cause.message === "email_taken") setAuthError("emailTaken");
+        else if (cause.message === "validation") {
+          setAuthError(authMode === "register" ? "registerInvalid" : "authFailed");
+        } else if (cause.message === "register_failed") setAuthError("registerFailed");
         else if (cause.message === "tenant_unavailable") setAuthError("tenantUnavailable");
+        else if (cause.message === "rate_limited") setAuthError("unavailable");
         else setAuthError("unavailable");
       } else {
         setAuthError("unavailable");

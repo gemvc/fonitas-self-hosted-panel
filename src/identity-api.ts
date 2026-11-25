@@ -33,7 +33,15 @@ export class IdentityApiError extends Error {
   readonly retryAfterSeconds?: number;
 
   constructor(
-    code: "rate_limited" | "unavailable" | "validation" | "email_taken" | "register_failed" | "tenant_unavailable",
+    code:
+      | "rate_limited"
+      | "unavailable"
+      | "validation"
+      | "email_taken"
+      | "register_failed"
+      | "tenant_unavailable"
+      | "auth_failed"
+      | "mfa_required",
     status?: number,
     retryAfterSeconds?: number,
   ) {
@@ -62,6 +70,14 @@ export type IdentityRegisterResult = {
   email: string;
   email_verified: boolean;
   tenant_slug: string;
+};
+
+export type IdentityLoginResult = {
+  display_name: string;
+  email: string;
+  email_verified: boolean;
+  tenant_slug: string;
+  mfa_required?: boolean;
 };
 
 /** Resolve the application Identity tenant for this installation Origin. */
@@ -98,6 +114,57 @@ export async function resolveIdentityTenantSlug(): Promise<string> {
 
 async function tenantSlug(): Promise<string> {
   return resolveIdentityTenantSlug();
+}
+
+/** Sign in against the application Identity realm; returns verification status from Symfony. */
+export async function loginIdentityUser(input: {
+  email: string;
+  password: string;
+}): Promise<IdentityLoginResult> {
+  const slug = await tenantSlug();
+  let response: Response;
+  try {
+    response = await identityRequest("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenant_slug: slug,
+        email: input.email,
+        password: input.password,
+      }),
+    });
+  } catch {
+    throw new IdentityApiError("unavailable");
+  }
+
+  if (response.status === 200) {
+    const body = await response.json() as {
+      data?: {
+        mfa_required?: boolean;
+        display_name?: string;
+        primary_email?: { email?: string; is_verified?: boolean };
+      };
+    };
+    if (body.data?.mfa_required) {
+      return {
+        display_name: "",
+        email: input.email,
+        email_verified: false,
+        tenant_slug: slug,
+        mfa_required: true,
+      };
+    }
+    return {
+      display_name: body.data?.display_name || input.email.split("@")[0] || input.email,
+      email: body.data?.primary_email?.email || input.email,
+      email_verified: Boolean(body.data?.primary_email?.is_verified),
+      tenant_slug: slug,
+    };
+  }
+  if (response.status === 401) throw new IdentityApiError("auth_failed", 401);
+  if (response.status === 429) throw await rateLimitedError(response);
+  if (response.status === 422) throw new IdentityApiError("validation", 422);
+  throw new IdentityApiError("unavailable", response.status);
 }
 
 /** Creates the Fonitas Identity user in this app's realm and triggers the verification email. */
