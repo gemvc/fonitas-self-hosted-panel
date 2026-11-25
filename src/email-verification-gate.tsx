@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
   IdentityApiError,
   resendEmailVerification,
@@ -24,6 +24,14 @@ type GateError =
   | "missingEmail"
   | "validation";
 
+function formatWait(seconds: number): string {
+  if (seconds >= 60) {
+    const minutes = Math.ceil(seconds / 60);
+    return `${minutes} min`;
+  }
+  return `${seconds}s`;
+}
+
 /** Full-page gate: unverified customers only enter the account after the code succeeds. */
 export function EmailVerificationGate({
   t,
@@ -44,19 +52,40 @@ export function EmailVerificationGate({
   const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<GateError | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [cooldownLeft, setCooldownLeft] = useState(0);
   const registeredHint = isVerificationEmailPending();
 
-  function mapIdentityError(cause: unknown): GateError {
-    if (cause instanceof IdentityApiError) {
-      if (cause.message === "rate_limited") return "rateLimited";
-      if (cause.message === "validation") return "validation";
+  useEffect(() => {
+    if (cooldownUntil <= 0) {
+      setCooldownLeft(0);
+      return;
+    }
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+      setCooldownLeft(left);
+      if (left <= 0) setCooldownUntil(0);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [cooldownUntil]);
+
+  function applyRateLimit(cause: unknown): GateError {
+    if (cause instanceof IdentityApiError && cause.message === "rate_limited") {
+      const seconds = cause.retryAfterSeconds ?? 60;
+      setCooldownUntil(Date.now() + seconds * 1000);
+      return "rateLimited";
+    }
+    if (cause instanceof IdentityApiError && cause.message === "validation") {
+      return "validation";
     }
     return "unavailable";
   }
 
   /** Same path for first send and every resend (Identity POST /auth/verification/resend). */
   async function sendCode() {
-    if (busy) return;
+    if (busy || cooldownLeft > 0) return;
     if (!email) {
       setError("missingEmail");
       return;
@@ -68,7 +97,7 @@ export function EmailVerificationGate({
       setCodeSent(true);
       markVerificationEmailPending();
     } catch (cause) {
-      setError(mapIdentityError(cause));
+      setError(applyRateLimit(cause));
     } finally {
       setBusy(false);
     }
@@ -99,17 +128,26 @@ export function EmailVerificationGate({
       onVerified(next);
       event.currentTarget.reset();
     } catch (cause) {
-      setError(mapIdentityError(cause));
+      setError(applyRateLimit(cause));
     } finally {
       setBusy(false);
     }
   }
 
+  const sendBlocked = !email || busy || cooldownLeft > 0;
   const sendLabel = busy
     ? t.loading
-    : codeSent
-      ? t.resendVerificationCode
-      : t.sendVerificationCode;
+    : cooldownLeft > 0
+      ? t.rateLimitedWait.replace("{wait}", formatWait(cooldownLeft))
+      : codeSent
+        ? t.resendVerificationCode
+        : t.sendVerificationCode;
+
+  const errorText = error === "rateLimited" && cooldownLeft > 0
+    ? t.rateLimitedWait.replace("{wait}", formatWait(cooldownLeft))
+    : error
+      ? t[error]
+      : null;
 
   return (
     <main className="setup">
@@ -129,7 +167,7 @@ export function EmailVerificationGate({
             type="button"
             className="primary full"
             onClick={() => void sendCode()}
-            disabled={!email || busy}
+            disabled={sendBlocked}
           >
             {sendLabel}
           </button>
@@ -155,7 +193,7 @@ export function EmailVerificationGate({
               {busy ? t.loading : t.submitVerificationCode}
             </button>
           </form>
-          {error && <p role="alert" className="error">{t[error]}</p>}
+          {errorText && <p role="alert" className="error">{errorText}</p>}
           <button type="button" className="full" onClick={onSignOut} disabled={busy}>{t.signOut}</button>
         </section>
       </section>

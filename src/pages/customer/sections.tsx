@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   IdentityApiError,
   resendEmailVerification,
@@ -17,6 +17,11 @@ import { ActionRow, ComingSoonNote, EmptyPanel, SectionFrame } from "./section-f
 
 type Text = typeof messages.en;
 type Go = (section: import("../../customer-nav").CustomerSection) => void;
+
+function formatWait(seconds: number): string {
+  if (seconds >= 60) return `${Math.ceil(seconds / 60)} min`;
+  return `${seconds}s`;
+}
 
 export function OverviewSection({ t, displayName, go }: { t: Text; displayName: string; go: Go }) {
   return (
@@ -155,17 +160,37 @@ export function ProfileSection({
   const [error, setError] = useState<
     "verifyFailed" | "verifyInvalid" | "rateLimited" | "unavailable" | "missingEmail" | "validation" | null
   >(null);
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [cooldownLeft, setCooldownLeft] = useState(0);
+
+  useEffect(() => {
+    if (cooldownUntil <= 0) {
+      setCooldownLeft(0);
+      return;
+    }
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+      setCooldownLeft(left);
+      if (left <= 0) setCooldownUntil(0);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [cooldownUntil]);
 
   function mapIdentityError(cause: unknown): typeof error {
     if (cause instanceof IdentityApiError) {
-      if (cause.message === "rate_limited") return "rateLimited";
+      if (cause.message === "rate_limited") {
+        setCooldownUntil(Date.now() + (cause.retryAfterSeconds ?? 60) * 1000);
+        return "rateLimited";
+      }
       if (cause.message === "validation") return "validation";
     }
     return "unavailable";
   }
 
   async function sendCode() {
-    if (busy || verified) return;
+    if (busy || verified || cooldownLeft > 0) return;
     if (!email) {
       setError("missingEmail");
       return;
@@ -215,6 +240,19 @@ export function ProfileSection({
     }
   }
 
+  const sendLabel = busy
+    ? t.loading
+    : cooldownLeft > 0
+      ? t.rateLimitedWait.replace("{wait}", formatWait(cooldownLeft))
+      : codeSent
+        ? t.resendVerificationCode
+        : t.sendVerificationCode;
+  const errorText = error === "rateLimited" && cooldownLeft > 0
+    ? t.rateLimitedWait.replace("{wait}", formatWait(cooldownLeft))
+    : error
+      ? t[error]
+      : null;
+
   return (
     <SectionFrame title={t.navProfile} intro={t.profileIntro}>
       <section className="panel-section">
@@ -256,8 +294,13 @@ export function ProfileSection({
               <p role="status">{codeSent ? t.verificationEmailSent : t.verificationRegisterHint}</p>
             )}
             <ActionRow>
-              <button type="button" className="primary" onClick={() => void sendCode()} disabled={!email || busy}>
-                {busy ? t.loading : codeSent ? t.resendVerificationCode : t.sendVerificationCode}
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void sendCode()}
+                disabled={!email || busy || cooldownLeft > 0}
+              >
+                {sendLabel}
               </button>
             </ActionRow>
             <form className="profile-form" onSubmit={event => void submitCode(event)}>
@@ -279,7 +322,7 @@ export function ProfileSection({
               <p className="muted">{t.verificationCodeHint}</p>
               <button type="submit" className="primary" disabled={!email || busy}>{t.submitVerificationCode}</button>
             </form>
-            {error && <p role="alert" className="error">{t[error]}</p>}
+            {errorText && <p role="alert" className="error">{errorText}</p>}
           </>
         )}
       </section>

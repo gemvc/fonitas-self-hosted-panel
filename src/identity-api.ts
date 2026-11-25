@@ -29,15 +29,32 @@ function identityRequest(path: string, init?: RequestInit): Promise<Response> {
 
 export class IdentityApiError extends Error {
   readonly status?: number;
+  /** Seconds until the next attempt is allowed (from Retry-After / RATE_LIMITED details). */
+  readonly retryAfterSeconds?: number;
 
   constructor(
     code: "rate_limited" | "unavailable" | "validation" | "email_taken" | "register_failed" | "tenant_unavailable",
     status?: number,
+    retryAfterSeconds?: number,
   ) {
     super(code);
     this.name = "IdentityApiError";
     this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
+}
+
+async function rateLimitedError(response: Response): Promise<IdentityApiError> {
+  const header = Number(response.headers.get("Retry-After") ?? "");
+  let fromBody = 0;
+  try {
+    const body = await response.json() as { error?: { details?: { retry_after?: number } } };
+    fromBody = Number(body.error?.details?.retry_after ?? 0);
+  } catch {
+    /* ignore non-JSON */
+  }
+  const seconds = Math.max(1, Math.floor(Number.isFinite(header) && header > 0 ? header : fromBody || 60));
+  return new IdentityApiError("rate_limited", 429, seconds);
 }
 
 export type IdentityRegisterResult = {
@@ -128,7 +145,7 @@ export async function registerIdentityUser(input: {
     }
     throw new IdentityApiError("validation", 422);
   }
-  if (response.status === 429) throw new IdentityApiError("rate_limited", 429);
+  if (response.status === 429) throw await rateLimitedError(response);
   throw new IdentityApiError("register_failed", response.status);
 }
 
@@ -146,7 +163,7 @@ export async function resendEmailVerification(email: string): Promise<void> {
     throw new IdentityApiError("unavailable");
   }
   if (response.status === 204) return;
-  if (response.status === 429) throw new IdentityApiError("rate_limited", 429);
+  if (response.status === 429) throw await rateLimitedError(response);
   if (response.status === 422) throw new IdentityApiError("validation", 422);
   throw new IdentityApiError("unavailable", response.status);
 }
@@ -165,7 +182,7 @@ export async function verifyEmailByCode(email: string, code: string): Promise<bo
   }
   if (response.status === 200) return true;
   if (response.status === 401 || response.status === 422) return false;
-  if (response.status === 429) throw new IdentityApiError("rate_limited", 429);
+  if (response.status === 429) throw await rateLimitedError(response);
   throw new IdentityApiError("unavailable", response.status);
 }
 
