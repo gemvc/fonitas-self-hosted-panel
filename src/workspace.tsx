@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { EmailVerificationGate } from "./email-verification-gate";
 import type { CustomerSection } from "./customer-nav";
 import type { messages } from "./locale";
 import {
-  isVerificationEmailPending,
   loadPanelMe,
   rememberLocalMe,
   SessionEndedError,
@@ -30,10 +30,7 @@ export function Workspace({
   const [me, setMe] = useState<PanelMe>();
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
-  // After register, Identity already emailed a code — open Profile to enter it.
-  const [section, setSection] = useState<CustomerSection>(
-    () => (isVerificationEmailPending() ? "profile" : "overview"),
-  );
+  const [section, setSection] = useState<CustomerSection>("overview");
 
   useEffect(() => {
     let active = true;
@@ -50,10 +47,23 @@ export function Workspace({
   }, [token, retry, endSession]);
 
   const customer = me ? isCustomer(me.roles) : false;
+  const verified = Boolean(me?.email_verified);
 
   function handleMeChange(next: PanelMe) {
     rememberLocalMe(next);
     setMe(next);
+  }
+
+  if (me && customer && !verified) {
+    return (
+      <EmailVerificationGate
+        t={t}
+        me={me}
+        menu={menu}
+        onVerified={handleMeChange}
+        onSignOut={onSignOut}
+      />
+    );
   }
 
   return (
@@ -62,7 +72,7 @@ export function Workspace({
         <strong>Fonitas</strong>
         <div className="actions">
           {menu}
-          {me && customer && (
+          {me && customer && verified && (
             <ProfileMenu
               t={t}
               displayName={me.display_name}
@@ -83,7 +93,7 @@ export function Workspace({
           </div>
         )}
         {me && !customer && <p className="muted">{t.noRole}</p>}
-        {me && customer && (
+        {me && customer && verified && (
           <CustomerDashboard
             t={t}
             me={me}

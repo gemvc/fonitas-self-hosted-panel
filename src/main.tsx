@@ -1,6 +1,7 @@
 import { StrictMode, useCallback, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { createLocalCustomerSession, isLocalCustomerToken } from "./customer-session";
+import { GuestBuy } from "./guest-buy";
 import { IdentityApiError, registerIdentityUser } from "./identity-api";
 import { messages, type Language } from "./locale";
 import { clearLocalMe, markVerificationEmailPending, rememberLocalMe } from "./panel-me";
@@ -33,6 +34,7 @@ function defaultLanguage(): Language {
 function Panel() {
   const [language, setLanguage] = useState(defaultLanguage);
   const [session, setSession] = useState<PanelSession | null>(null);
+  const [guestBrowse, setGuestBrowse] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [busy, setBusy] = useState(false);
   const [authError, setAuthError] = useState<AuthError | null>(null);
@@ -88,6 +90,7 @@ function Panel() {
       const next = createLocalCustomerSession(displayName, email);
       if (verified) next.me.email_verified = true;
       rememberLocalMe(next.me);
+      setGuestBrowse(false);
       setSession({ access_token: next.access_token, expires_in: next.expires_in });
       event.currentTarget.reset();
     } catch (cause) {
@@ -125,8 +128,27 @@ function Panel() {
     </select>
   );
 
-  if (session) return <Workspace token={session.access_token} endSession={endSession} t={t} menu={languageMenu}
-    onSignOut={() => signOut(session.access_token)} />;
+  if (session) {
+    return (
+      <Workspace
+        token={session.access_token}
+        endSession={endSession}
+        t={t}
+        menu={languageMenu}
+        onSignOut={() => signOut(session.access_token)}
+      />
+    );
+  }
+
+  if (guestBrowse && !setupPairing) {
+    return (
+      <GuestBuy
+        t={t}
+        menu={languageMenu}
+        onBackToAuth={() => setGuestBrowse(false)}
+      />
+    );
+  }
 
   return (
     <main className="setup">
@@ -171,6 +193,14 @@ function Panel() {
                 {busy ? t.loading : authMode === "register" ? t.register : t.signIn}
               </button>
             </form>
+            <button
+              type="button"
+              className="full"
+              disabled={busy}
+              onClick={() => { setAuthError(null); setGuestBrowse(true); }}
+            >
+              {t.continueWithoutAccount}
+            </button>
           </section>
         )}
       </section>
