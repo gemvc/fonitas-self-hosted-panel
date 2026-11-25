@@ -39,9 +39,12 @@ export function EmailVerificationGate({
   onSignOut: () => void;
 }) {
   const email = me.email ?? "";
-  const [codeSent, setCodeSent] = useState(() => isVerificationEmailPending());
+  // Do not treat register-time pending as "already sent this session" — that made the
+  // button say Resend before any successful click, and returning users got stuck.
+  const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<GateError | null>(null);
+  const registeredHint = isVerificationEmailPending();
 
   function mapIdentityError(cause: unknown): GateError {
     if (cause instanceof IdentityApiError) {
@@ -51,6 +54,7 @@ export function EmailVerificationGate({
     return "unavailable";
   }
 
+  /** Same path for first send and every resend (Identity POST /auth/verification/resend). */
   async function sendCode() {
     if (busy) return;
     if (!email) {
@@ -101,6 +105,12 @@ export function EmailVerificationGate({
     }
   }
 
+  const sendLabel = busy
+    ? t.loading
+    : codeSent
+      ? t.resendVerificationCode
+      : t.sendVerificationCode;
+
   return (
     <main className="setup">
       <section className="card">
@@ -112,7 +122,17 @@ export function EmailVerificationGate({
             <span dir="ltr">{email || "—"}</span>
             <span className="muted">{t.emailUnverified}</span>
           </p>
-          {codeSent && <p role="status">{t.verificationEmailSent}</p>}
+          {(registeredHint || codeSent) && (
+            <p role="status">{codeSent ? t.verificationEmailSent : t.verificationRegisterHint}</p>
+          )}
+          <button
+            type="button"
+            className="primary full"
+            onClick={() => void sendCode()}
+            disabled={!email || busy}
+          >
+            {sendLabel}
+          </button>
           <form className="profile-form" onSubmit={event => void submitCode(event)}>
             <label>{t.verificationCode}
               <input
@@ -135,9 +155,6 @@ export function EmailVerificationGate({
               {busy ? t.loading : t.submitVerificationCode}
             </button>
           </form>
-          <button type="button" className="full" onClick={() => void sendCode()} disabled={!email || busy}>
-            {codeSent ? t.resendVerificationCode : t.sendVerificationCode}
-          </button>
           {error && <p role="alert" className="error">{t[error]}</p>}
           <button type="button" className="full" onClick={onSignOut} disabled={busy}>{t.signOut}</button>
         </section>

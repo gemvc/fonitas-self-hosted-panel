@@ -149,7 +149,8 @@ export function ProfileSection({
 }) {
   const email = me.email ?? "";
   const [verified, setVerified] = useState(Boolean(me.email_verified));
-  const [codeSent, setCodeSent] = useState(() => isVerificationEmailPending());
+  // Same as the verification gate: only flip to "Resend" after a successful send this visit.
+  const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<
     "verifyFailed" | "verifyInvalid" | "rateLimited" | "unavailable" | "missingEmail" | "validation" | null
@@ -251,12 +252,12 @@ export function ProfileSection({
         ) : (
           <>
             <p className="muted">{t.verifyEmailIntro}</p>
-            {codeSent && (
-              <p role="status">{t.verificationEmailSent}</p>
+            {(isVerificationEmailPending() || codeSent) && (
+              <p role="status">{codeSent ? t.verificationEmailSent : t.verificationRegisterHint}</p>
             )}
             <ActionRow>
-              <button type="button" onClick={() => void sendCode()} disabled={!email || busy}>
-                {busy && !codeSent ? t.loading : codeSent ? t.resendVerificationCode : t.sendVerificationCode}
+              <button type="button" className="primary" onClick={() => void sendCode()} disabled={!email || busy}>
+                {busy ? t.loading : codeSent ? t.resendVerificationCode : t.sendVerificationCode}
               </button>
             </ActionRow>
             <form className="profile-form" onSubmit={event => void submitCode(event)}>
