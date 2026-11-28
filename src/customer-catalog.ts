@@ -10,6 +10,10 @@ type CatalogResponse = {
 /** Public catalog filtered to the OEM-bound application (OPEN checkout-ready offers). */
 export async function listBoundCatalogOffers(): Promise<BoundCatalogListing[]> {
   const applicationId = await resolveBoundApplicationId();
-  const body = await customerJson<CatalogResponse>("/catalog/applications?per_page=100");
+  const body = await customerJson<CatalogResponse>("/catalog/applications?per_page=100", {
+    method: "GET",
+    csrf: false,
+    credentialsMode: "omit",
+  });
   return filterCatalogForApplication(body.data ?? [], applicationId);
 }

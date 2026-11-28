@@ -41,7 +41,9 @@ Do **not** register buyers into tenant `fonitas`.
 | GET | `/payments/checkouts/{id}` | Read checkout status (org/staff oriented; buyers usually follow Stripe + email) |
 | POST | `/payments/checkouts/{id}/confirm` | Test-provider confirm only; Stripe waits for webhook |
 
-OEM **Buy** must filter catalog/offers to the **installation-bound application** (from OEM activate / panel binding). Do not show other apps’ offers. The panel resolves that id via `GET /api/bound-application` (customer PHP) or `index.php?view=bound-application`, with optional `VITE_APPLICATION_ID`.
+OEM **Buy** must filter catalog/offers to the **installation-bound application** (from OEM activate / panel binding). Do not show other apps’ offers. The panel resolves that id via `GET /api/bound-application` (customer PHP) or `index.php?view=bound-application`, with optional `VITE_APPLICATION_ID`. Catalog and checkout start use `credentials: omit` so guests do not need Identity cookies.
+
+**Stripe return URLs (ops):** Point `STRIPE_CHECKOUT_SUCCESS_URL` / cancel at the OEM origin with `?section=buy&checkout=success` or `checkout=cancel` (plus `{CHECKOUT_SESSION_ID}` where Stripe requires it on success). The Buy section reads `checkout` and shows email/attach guidance; it does not reveal keys. Post-pay attach remains Licenses + recovery `signed_url`.
 
 **Deploy note:** Route the OEM host’s `/api/*` to `customer/public` so health, bound-application, and the `/api/v1` UpstreamProxy share the buyer origin.
 
@@ -64,8 +66,9 @@ Live ticket stack — suitable for an in-panel “Send ticket / My tickets” ex
 | --- | --- | --- |
 | GET, POST | `/support/workspaces` | List / create workspace (tenant-scoped) |
 | GET | `/support/workspaces/{id}` | Workspace detail |
-| GET, POST | `/support/workspaces/{id}/tickets` | List / open ticket (`PORTAL` or `API`) |
-| GET | `/support/tickets/{id}` | Ticket + thread |
+| GET, POST | `/support/workspaces/{id}/tickets` | List / open ticket (`PORTAL` or `API`). List is requester-scoped unless `support.ticket.assign` |
+| GET | `/support/tickets/{id}` | Ticket metadata |
+| GET | `/support/tickets/{id}/messages` | Thread (`COMMENT`; `NOTE` only with `support.ticket.assign`) |
 | POST | `/support/tickets/{id}/messages` | `COMMENT` for requester; `NOTE` needs `support.ticket.assign` |
 | POST | `/support/tickets/{id}/assign` | Agent only (`support.ticket.assign`) |
 | POST | `/support/tickets/{id}/resolve` | Agent |

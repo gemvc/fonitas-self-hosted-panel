@@ -29,8 +29,8 @@ Sidebar sections today: overview · buy · licenses · subscriptions · billing 
 
 | ID | Feature | APIs / work | Status |
 | --- | --- | --- | --- |
-| C-10 | List my purchases / licenses (no raw key) | `GET /license/me/purchases` (+ `validity`) | Wired |
-| C-11 | Attach guest purchase to account | Recovery link → `POST /license/me/purchases/{id}/attach` | Wired |
+| C-10 | List my purchases / licenses (no raw key) | `GET /license/me/purchases` (+ `validity`); app Identity tenants supported | Wired |
+| C-11 | Attach guest purchase to account | Recovery `#recovery=` / signed URL → `POST /license/me/purchases/{id}/attach` | Wired |
 | C-12 | Show edition, platforms, seats, runtime/support cutoffs | From purchase `snapshot` + `validity` on C-10 | Wired |
 | C-13 | Overview counters (licenses, open tickets, …) | Derive from C-10 / Support list | Wired |
 | C-14 | Device register / remove UI | **Needed** — seats/devices are snapshot facts only; no device CRUD | Needed |
@@ -42,10 +42,10 @@ Sidebar sections today: overview · buy · licenses · subscriptions · billing 
 
 | ID | Feature | APIs / work | Status |
 | --- | --- | --- | --- |
-| C-20 | Show sellable offers for **this** application only | `GET /catalog/applications` (+ detail); filter by installation-bound app / listing | Wired |
-| C-21 | Start checkout (guest or signed-in email) | `POST /payments/checkouts` → Stripe URL | Wired |
-| C-22 | Post-pay “claim / attach” path in panel | Email recovery page or in-panel attach (C-11) | Wired |
-| C-23 | Freemium / matrix offers in OEM buy | Same catalog + checkout; depends on publisher gallery activation | Ready (publisher-side) |
+| C-20 | Show sellable offers for **this** application only | `GET /catalog/applications` (+ detail); filter by installation-bound app / listing | Wired (price/billing/seats cards) |
+| C-21 | Start checkout (guest or signed-in email) | `POST /payments/checkouts` → Stripe URL | Wired (guest omit-cookies; FREE vs Stripe outcomes) |
+| C-22 | Post-pay “claim / attach” path in panel | Email recovery + `?checkout=success\|cancel` return copy + Licenses attach | Wired |
+| C-23 | Freemium / matrix offers in OEM buy | Same catalog + checkout; depends on publisher gallery activation | Wired (FREEMIUM path); gallery activate stays publisher-side |
 
 ---
 
@@ -55,9 +55,9 @@ Sidebar sections today: overview · buy · licenses · subscriptions · billing 
 | --- | --- | --- | --- |
 | C-30 | Ensure Support workspace for app tenant | `POST /support/workspaces` (or provision on Platform Support entitlement) | Wired (create-on-visit); auto-provision on entitlement still Symfony |
 | C-31 | Open ticket from panel | `POST /support/workspaces/{id}/tickets` (`source: PORTAL`) | Wired |
-| C-32 | List my tickets / open ticket detail | `GET …/tickets`, `GET /support/tickets/{id}` | Wired |
+| C-32 | List my tickets / open ticket detail | `GET …/tickets` (requester-scoped), `GET /support/tickets/{id}`, `GET …/messages` | Wired |
 | C-33 | Reply as customer | `POST /support/tickets/{id}/messages` with `COMMENT` | Wired |
-| C-34 | Hide agent actions | Assign / resolve / close / reopen / `NOTE` only if `support.ticket.assign` | Wired (RBAC) |
+| C-34 | Hide agent actions | Assign / resolve / close / reopen / `NOTE` only if `support.ticket.assign` | Wired (RBAC + agent actions in OEM) |
 | C-35 | Attachments upload | Metadata-only today; **Needed** byte upload contract if buyers must attach files | Needed (or defer) |
 | C-36 | Ticket email ingress / CSAT | Documented deferred in Support domain | Needed (later) |
 

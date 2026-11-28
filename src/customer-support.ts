@@ -1,5 +1,8 @@
 import { resolveBoundApplicationId } from "./bound-application";
+import { isTicketClosed } from "./customer-binding";
 import { customerJson, customerRequest, CustomerApiError } from "./customer-api";
+
+export { isTicketClosed };
 
 export type SupportWorkspace = {
   public_id?: string;
@@ -17,6 +20,7 @@ export type SupportTicket = {
   priority?: string;
   created_at?: string;
   updated_at?: string;
+  closed_at?: string | null;
   application_id?: string | null;
 };
 
@@ -96,17 +100,19 @@ export async function createTicket(
   return body.data;
 }
 
-export async function getTicket(ticketId: string): Promise<{
-  ticket: SupportTicket;
-  messages: SupportMessage[];
-}> {
-  const body = await customerJson<{
-    data: SupportTicket & { messages?: SupportMessage[] };
-  }>(`/support/tickets/${encodeURIComponent(ticketId)}`);
-  return {
-    ticket: body.data,
-    messages: body.data.messages ?? [],
-  };
+export async function getTicket(ticketId: string): Promise<SupportTicket> {
+  const body = await customerJson<{ data: SupportTicket }>(
+    `/support/tickets/${encodeURIComponent(ticketId)}`,
+  );
+  return body.data;
+}
+
+/** GET /support/tickets/{id}/messages — NOTE filtered server-side for non-agents. */
+export async function listTicketMessages(ticketId: string): Promise<SupportMessage[]> {
+  const body = await customerJson<{ data: SupportMessage[] }>(
+    `/support/tickets/${encodeURIComponent(ticketId)}/messages`,
+  );
+  return body.data ?? [];
 }
 
 export async function replyToTicket(ticketId: string, message: string): Promise<void> {
@@ -114,6 +120,30 @@ export async function replyToTicket(ticketId: string, message: string): Promise<
     method: "POST",
     body: JSON.stringify({ message, message_type: "COMMENT" }),
   });
+}
+
+export async function resolveTicket(ticketId: string): Promise<SupportTicket> {
+  const body = await customerJson<{ data: SupportTicket }>(
+    `/support/tickets/${encodeURIComponent(ticketId)}/resolve`,
+    { method: "POST", body: "{}" },
+  );
+  return body.data;
+}
+
+export async function closeTicket(ticketId: string): Promise<SupportTicket> {
+  const body = await customerJson<{ data: SupportTicket }>(
+    `/support/tickets/${encodeURIComponent(ticketId)}/close`,
+    { method: "POST", body: "{}" },
+  );
+  return body.data;
+}
+
+export async function reopenTicket(ticketId: string): Promise<SupportTicket> {
+  const body = await customerJson<{ data: SupportTicket }>(
+    `/support/tickets/${encodeURIComponent(ticketId)}/reopen`,
+    { method: "POST", body: "{}" },
+  );
+  return body.data;
 }
 
 /** Buyer may act as agent only when /auth/me includes support.ticket.assign. */

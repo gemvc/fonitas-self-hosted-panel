@@ -57,7 +57,14 @@ export function CustomerDashboard({
 
       <div className="customer-main">
         {section === "overview" && <OverviewSection t={t} displayName={me.display_name} go={onSectionChange} />}
-        {section === "buy" && <BuySection t={t} buyerEmail={me.email ?? ""} />}
+        {section === "buy" && (
+          <BuySection
+            t={t}
+            buyerEmail={me.email ?? ""}
+            signedIn
+            onGoLicenses={() => onSectionChange("licenses")}
+          />
+        )}
         {section === "licenses" && <LicensesSection t={t} />}
         {section === "subscriptions" && <SubscriptionsSection t={t} go={onSectionChange} />}
         {section === "billing" && <BillingSection t={t} />}

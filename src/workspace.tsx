@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { EmailVerificationGate } from "./email-verification-gate";
-import type { CustomerSection } from "./customer-nav";
+import { isCustomerSection, type CustomerSection } from "./customer-nav";
 import type { messages } from "./locale";
 import {
   loadPanelMe,
@@ -30,7 +30,10 @@ export function Workspace({
   const [me, setMe] = useState<PanelMe>();
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
-  const [section, setSection] = useState<CustomerSection>("overview");
+  const [section, setSection] = useState<CustomerSection>(() => {
+    const fromQuery = new URLSearchParams(window.location.search).get("section") ?? "";
+    return isCustomerSection(fromQuery) ? fromQuery : "overview";
+  });
 
   useEffect(() => {
     let active = true;
@@ -48,6 +51,14 @@ export function Workspace({
 
   const customer = me ? isCustomer(me.roles) : false;
   const verified = Boolean(me?.email_verified);
+
+  function goToSection(next: CustomerSection) {
+    setSection(next);
+    const url = new URL(window.location.href);
+    if (next === "overview") url.searchParams.delete("section");
+    else url.searchParams.set("section", next);
+    window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+  }
 
   function handleMeChange(next: PanelMe) {
     rememberLocalMe(next);
@@ -76,8 +87,8 @@ export function Workspace({
             <ProfileMenu
               t={t}
               displayName={me.display_name}
-              onProfile={() => setSection("profile")}
-              onTicket={() => setSection("support")}
+              onProfile={() => goToSection("profile")}
+              onTicket={() => goToSection("support")}
               onSignOut={onSignOut}
             />
           )}
@@ -99,7 +110,7 @@ export function Workspace({
             me={me}
             onMeChange={handleMeChange}
             section={section}
-            onSectionChange={setSection}
+            onSectionChange={goToSection}
           />
         )}
       </main>

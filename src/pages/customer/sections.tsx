@@ -8,13 +8,24 @@ import {
   startCheckout,
   type BoundPurchase,
 } from "../../customer-purchases";
-import { parseAttachParams, type BoundCatalogListing } from "../../customer-binding";
 import {
+  formatCatalogOfferDisplay,
+  parseAttachParams,
+  parseCheckoutReturn,
+  resolveAttachFields,
+  type BoundCatalogListing,
+} from "../../customer-binding";
+import {
+  closeTicket,
   createTicket,
   ensureSupportWorkspace,
   getTicket,
+  isTicketClosed,
+  listTicketMessages,
   listTickets,
+  reopenTicket,
   replyToTicket,
+  resolveTicket,
   viewerCanAssignTickets,
   type SupportMessage,
   type SupportTicket,
@@ -150,15 +161,40 @@ export function OverviewSection({ t, displayName, go }: { t: Text; displayName: 
   );
 }
 
-export function BuySection({ t, buyerEmail = "" }: { t: Text; buyerEmail?: string }) {
+export function BuySection({
+  t,
+  buyerEmail = "",
+  signedIn = false,
+  onGoLicenses,
+}: {
+  t: Text;
+  buyerEmail?: string;
+  signedIn?: boolean;
+  onGoLicenses?: () => void;
+}) {
   const [listings, setListings] = useState<BoundCatalogListing[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [email, setEmail] = useState(buyerEmail);
   const [busyOffer, setBusyOffer] = useState<string | null>(null);
 
   useEffect(() => {
     setEmail(buyerEmail);
   }, [buyerEmail]);
+
+  useEffect(() => {
+    const returned = parseCheckoutReturn(window.location.search);
+    if (returned === "success") {
+      setStatus(signedIn ? t.checkoutReturnSuccessSignedIn : t.checkoutReturnSuccessGuest);
+    } else if (returned === "cancel") {
+      setStatus(t.checkoutReturnCancel);
+    }
+    if (returned) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("checkout");
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    }
+  }, [signedIn, t.checkoutReturnCancel, t.checkoutReturnSuccessGuest, t.checkoutReturnSuccessSignedIn]);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,21 +228,31 @@ export function BuySection({ t, buyerEmail = "" }: { t: Text; buyerEmail?: strin
   async function checkout(offerId: string) {
     const trimmed = email.trim();
     if (!trimmed || !trimmed.includes("@")) {
-      setError(t.checkoutFailed);
+      setError(t.checkoutEmailInvalid);
       return;
     }
     setBusyOffer(offerId);
     setError(null);
+    setStatus(null);
     try {
       const result = await startCheckout({ offerId, buyerEmail: trimmed });
       if (result.checkout_url) {
         window.location.assign(result.checkout_url);
         return;
       }
-      // FREE checkout — send buyer to licenses attach path.
-      window.location.assign(`${window.location.pathname}?section=licenses`);
-    } catch {
-      setError(t.checkoutFailed);
+      // FREE / fulfilled without hosted URL.
+      if (signedIn && onGoLicenses) {
+        setStatus(t.checkoutFreeSignedIn);
+        onGoLicenses();
+        return;
+      }
+      setStatus(t.checkoutFreeGuest);
+    } catch (cause) {
+      if (cause instanceof CustomerApiError && cause.code === "PAYMENT_NOT_CONFIGURED") {
+        setError(t.checkoutNotConfigured);
+      } else {
+        setError(t.checkoutFailed);
+      }
     } finally {
       setBusyOffer(null);
     }
@@ -231,26 +277,40 @@ export function BuySection({ t, buyerEmail = "" }: { t: Text; buyerEmail?: strin
       ) : (
         <ul className="applications">
           {listings.flatMap(listing =>
-            listing.offers.map(offer => (
-              <li key={offer.id} className="bar">
-                <div>
-                  <strong>{offer.title || listing.name}</strong>
-                  <span className="muted"> · {listing.name}</span>
-                </div>
-                <ActionRow>
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={busyOffer === offer.id}
-                    onClick={() => void checkout(offer.id)}
-                  >
-                    {busyOffer === offer.id ? t.loading : t.offerCheckout}
-                  </button>
-                </ActionRow>
-              </li>
-            )),
+            listing.offers.map(offer => {
+              const display = formatCatalogOfferDisplay(listing, offer);
+              return (
+                <li key={offer.id} className="bar">
+                  <div>
+                    <strong>{display.title}</strong>
+                    <span className="muted"> · {listing.name}</span>
+                  </div>
+                  <div className="muted">
+                    {display.priceLabel}
+                    {" · "}
+                    {display.billingLabel}
+                    {display.seatsLabel ? ` · ${t.seatsLabel}: ${display.seatsLabel}` : ""}
+                    {display.platformsLabel ? ` · ${display.platformsLabel}` : ""}
+                  </div>
+                  <ActionRow>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={busyOffer === offer.id}
+                      onClick={() => void checkout(offer.id)}
+                    >
+                      {busyOffer === offer.id ? t.loading : t.offerCheckout}
+                    </button>
+                  </ActionRow>
+                </li>
+              );
+            }),
           )}
         </ul>
+      )}
+      {status && <p role="status">{status}</p>}
+      {status && status !== t.checkoutReturnCancel && (
+        <p className="muted">{signedIn ? t.checkoutAttachHintSignedIn : t.checkoutAttachHintGuest}</p>
       )}
       {error && <p role="alert" className="error">{error}</p>}
     </SectionFrame>
@@ -307,12 +367,18 @@ export function LicensesSection({ t }: { t: Text }) {
   async function onAttach(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
-    const licenseId = String(fd.get("license_id") ?? "").trim();
-    const signedUrl = String(fd.get("signed_url") ?? "").trim();
+    const parsed = resolveAttachFields(
+      String(fd.get("license_id") ?? ""),
+      String(fd.get("signed_url") ?? ""),
+    );
+    if (!parsed) {
+      setAttachMsg(t.attachLicenseFailed);
+      return;
+    }
     setBusy(true);
     setAttachMsg(null);
     try {
-      await attachPurchase(licenseId, signedUrl);
+      await attachPurchase(parsed.licenseId, parsed.signedUrl);
       await reload();
       setAttachMsg(t.attachLicenseSuccess);
       event.currentTarget.reset();
@@ -448,10 +514,16 @@ export function SupportSection({ t }: { t: Text }) {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [tickets, setTickets] = useState<SupportTicket[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<SupportTicket | null>(null);
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [canAssign, setCanAssign] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  async function refreshList(id: string) {
+    const list = await listTickets(id);
+    setTickets(list);
+    return list;
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -460,11 +532,8 @@ export function SupportSection({ t }: { t: Text }) {
         const id = await ensureSupportWorkspace();
         if (cancelled) return;
         setWorkspaceId(id);
-        const list = await listTickets(id);
-        if (!cancelled) {
-          setTickets(list);
-          setError(null);
-        }
+        await refreshList(id);
+        if (!cancelled) setError(null);
         const agent = await viewerCanAssignTickets();
         if (!cancelled) setCanAssign(agent);
       } catch {
@@ -480,12 +549,21 @@ export function SupportSection({ t }: { t: Text }) {
   }, [t.supportWorkspaceUnavailable]);
 
   async function openTicket(ticketId: string) {
-    setSelected(ticketId);
+    setBusy(true);
+    setError(null);
     try {
-      const detail = await getTicket(ticketId);
-      setMessages(detail.messages);
+      const [ticket, thread] = await Promise.all([
+        getTicket(ticketId),
+        listTicketMessages(ticketId),
+      ]);
+      setSelected(ticket);
+      setMessages(thread);
+      setTickets(prev => (prev ?? []).map(row => (row.public_id === ticket.public_id ? ticket : row)));
     } catch {
       setMessages([]);
+      setError(t.loadFailed);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -495,10 +573,12 @@ export function SupportSection({ t }: { t: Text }) {
     const fd = new FormData(event.currentTarget);
     const subject = String(fd.get("subject") ?? "").trim();
     const category = String(fd.get("category") ?? "general").trim() || "general";
+    const priority = String(fd.get("priority") ?? "NORMAL").trim() || "NORMAL";
     if (!subject) return;
     setBusy(true);
+    setError(null);
     try {
-      const ticket = await createTicket(workspaceId, { subject, category });
+      const ticket = await createTicket(workspaceId, { subject, category, priority });
       setTickets(prev => [ticket, ...(prev ?? [])]);
       event.currentTarget.reset();
       await openTicket(ticket.public_id);
@@ -511,14 +591,15 @@ export function SupportSection({ t }: { t: Text }) {
 
   async function onReply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selected) return;
+    if (!selected || isTicketClosed(selected.status)) return;
     const fd = new FormData(event.currentTarget);
     const message = String(fd.get("message") ?? "").trim();
     if (!message) return;
     setBusy(true);
+    setError(null);
     try {
-      await replyToTicket(selected, message);
-      await openTicket(selected);
+      await replyToTicket(selected.public_id, message);
+      await openTicket(selected.public_id);
       event.currentTarget.reset();
     } catch {
       setError(t.loadFailed);
@@ -526,6 +607,30 @@ export function SupportSection({ t }: { t: Text }) {
       setBusy(false);
     }
   }
+
+  async function runAgentAction(action: "resolve" | "close" | "reopen") {
+    if (!selected || !canAssign) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = action === "resolve"
+        ? await resolveTicket(selected.public_id)
+        : action === "close"
+          ? await closeTicket(selected.public_id)
+          : await reopenTicket(selected.public_id);
+      setSelected(next);
+      if (workspaceId) await refreshList(workspaceId);
+      const thread = await listTicketMessages(next.public_id);
+      setMessages(thread);
+    } catch {
+      setError(t.loadFailed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const closed = selected ? isTicketClosed(selected.status) : false;
+  const canReply = Boolean(selected) && !closed;
 
   return (
     <SectionFrame title={t.navSupport} intro={t.ticketsIntro}>
@@ -540,7 +645,11 @@ export function SupportSection({ t }: { t: Text }) {
             <li key={ticket.public_id} className="bar">
               <button type="button" className="stat-link" onClick={() => void openTicket(ticket.public_id)}>
                 <strong>{ticket.subject}</strong>
-                <span className="muted"> · {ticket.status}</span>
+                <span className="muted">
+                  {" · "}{ticket.status}
+                  {ticket.priority ? ` · ${ticket.priority}` : ""}
+                  {" · "}{formatDate(ticket.updated_at || ticket.created_at)}
+                </span>
               </button>
             </li>
           ))}
@@ -549,22 +658,50 @@ export function SupportSection({ t }: { t: Text }) {
 
       {selected && (
         <section className="panel-section">
-          <h2>{tickets?.find(x => x.public_id === selected)?.subject || selected}</h2>
+          <h2>{selected.subject}</h2>
+          <p className="muted">
+            {selected.status}
+            {selected.priority ? ` · ${t.ticketPriority}: ${selected.priority}` : ""}
+            {" · "}{formatDate(selected.created_at)}
+          </p>
           <ul className="applications">
-            {messages.map(m => (
+            {messages.length === 0 ? (
+              <li className="bar muted"><span>{t.ticketThreadEmpty}</span></li>
+            ) : messages.map(m => (
               <li key={m.public_id} className="bar">
                 <span className="muted">{m.message_type} · {formatDate(m.created_at)}</span>
                 <div>{m.message}</div>
               </li>
             ))}
           </ul>
-          <form className="profile-form" onSubmit={event => void onReply(event)}>
-            <label>{t.ticketReply}
-              <textarea name="message" required disabled={busy} rows={3} />
-            </label>
-            <button type="submit" className="primary" disabled={busy}>{t.ticketSendReply}</button>
-          </form>
-          {!canAssign && <p className="muted">{t.featureUnavailable}</p>}
+          {canReply && (
+            <form className="profile-form" onSubmit={event => void onReply(event)}>
+              <label>{t.ticketReply}
+                <textarea name="message" required disabled={busy} rows={3} />
+              </label>
+              <button type="submit" className="primary" disabled={busy}>{t.ticketSendReply}</button>
+            </form>
+          )}
+          {closed && !canAssign && <p className="muted">{t.ticketClosedHint}</p>}
+          {canAssign && (
+            <ActionRow>
+              {!closed && (
+                <>
+                  <button type="button" disabled={busy} onClick={() => void runAgentAction("resolve")}>
+                    {t.ticketResolve}
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => void runAgentAction("close")}>
+                    {t.ticketClose}
+                  </button>
+                </>
+              )}
+              {closed && (
+                <button type="button" className="primary" disabled={busy} onClick={() => void runAgentAction("reopen")}>
+                  {t.ticketReopen}
+                </button>
+              )}
+            </ActionRow>
+          )}
         </section>
       )}
 
@@ -576,6 +713,14 @@ export function SupportSection({ t }: { t: Text }) {
           </label>
           <label>{t.ticketCategory}
             <input name="category" defaultValue="general" disabled={busy || !workspaceId} />
+          </label>
+          <label>{t.ticketPriority}
+            <select name="priority" defaultValue="NORMAL" disabled={busy || !workspaceId}>
+              <option value="LOW">LOW</option>
+              <option value="NORMAL">NORMAL</option>
+              <option value="HIGH">HIGH</option>
+              <option value="URGENT">URGENT</option>
+            </select>
           </label>
           <button type="submit" className="primary" disabled={busy || !workspaceId}>
             {t.newTicket}

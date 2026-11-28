@@ -38,6 +38,7 @@ export async function startCheckout(input: {
   }>("/payments/checkouts", {
     method: "POST",
     csrf: false,
+    credentialsMode: "omit",
     body: JSON.stringify({
       offer_id: input.offerId,
       buyer_email: input.buyerEmail,

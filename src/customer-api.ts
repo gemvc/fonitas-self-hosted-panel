@@ -76,7 +76,11 @@ export function clearCustomerCsrf(): void {
   csrfToken = null;
 }
 
-type CustomerRequestInit = RequestInit & { csrf?: boolean };
+type CustomerRequestInit = RequestInit & {
+  csrf?: boolean;
+  /** Public catalog/checkout may omit cookies so guests do not depend on Identity. */
+  credentialsMode?: RequestCredentials;
+};
 
 export async function customerRequest(path: string, init: CustomerRequestInit = {}): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
@@ -93,11 +97,12 @@ export async function customerRequest(path: string, init: CustomerRequestInit = 
   if (init.body != null && !headers["Content-Type"] && !(init.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
+  const { csrf: _csrf, credentialsMode, ...fetchInit } = init;
   try {
     return await fetch(`${customerApiBase}${path}`, {
-      ...init,
+      ...fetchInit,
       method,
-      credentials: "include",
+      credentials: credentialsMode ?? "include",
       cache: "no-store",
       headers,
       signal: init.signal ?? AbortSignal.timeout(30_000),

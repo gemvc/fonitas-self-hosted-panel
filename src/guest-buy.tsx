@@ -25,7 +25,7 @@ export function GuestBuy({
       </header>
       <main className="customer-main guest-buy">
         <p className="muted">{t.guestBuyIntro}</p>
-        <BuySection t={t} />
+        <BuySection t={t} signedIn={false} />
       </main>
     </div>
   );
