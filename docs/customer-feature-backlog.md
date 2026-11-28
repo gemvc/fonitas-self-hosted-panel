@@ -95,11 +95,23 @@ Sidebar sections today: overview · buy · licenses · subscriptions · billing 
 
 ---
 
+## P7 — Buyer UX polish (ease of process)
+
+| ID | Feature | Work | Status |
+| --- | --- | --- | --- |
+| U-01 | Guest post-pay / attach handoff | Open guest Buy on `?checkout=` / `?section=buy`; stash post-login `section=licenses` (+ attach hash/query) | Wired |
+| U-02 | Buy from verification gate | Gate CTA opens guest Buy without forcing a dead-end | Wired |
+| U-03 | MFA + forgot/reset password | `challenge_token` MFA step; forgot/reset against Identity APIs | Wired |
+| U-04 | Hide unfinished account chrome | Remove Devices CRUD, Cancel plan, payment-methods placeholders until Symfony Ready | Wired |
+| U-05 | OEM branding on customer shell | Public `view=branding` + React topbar name/logo/accent | Wired |
+| U-06 | Simpler attach + licenses empty CTA | Single paste field; empty licenses → Buy now | Wired |
+
 ## Recommended build sequence
 
 ```text
 C-01/C-03 (trust) → C-10/C-11 (licenses) → C-20/C-21 (buy)
   → C-30–C-33 (tickets) → C-40/C-42 (subscriptions/billing display)
+  → U-01–U-06 (buyer UX polish)
   → C-14/C-41/C-43 only after Symfony contracts exist
 ```
 

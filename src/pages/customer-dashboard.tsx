@@ -65,7 +65,7 @@ export function CustomerDashboard({
             onGoLicenses={() => onSectionChange("licenses")}
           />
         )}
-        {section === "licenses" && <LicensesSection t={t} />}
+        {section === "licenses" && <LicensesSection t={t} go={onSectionChange} />}
         {section === "subscriptions" && <SubscriptionsSection t={t} go={onSectionChange} />}
         {section === "billing" && <BillingSection t={t} />}
         {section === "support" && <SupportSection t={t} />}

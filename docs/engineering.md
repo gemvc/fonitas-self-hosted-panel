@@ -220,8 +220,8 @@ The static client currently loads identity through [`panel-me.ts`](../src/panel-
 | --- | --- | --- |
 | `POST /api/v1/developer-panels/oem/activate` | PHP only, exact `Origin` and JSON `connection_key` for a bound installation | `200`, `data.installation_token` (`fpi_…`) |
 | `GET /api/v1/developer-panels/oem/application` | PHP only, exact `Origin` and installation bearer | `200`, `data.application` with `public_id`, `name`, `slug`, and `status` |
-| `GET /index.php?view=branding` | OEM browser, host-authenticated allowlisted viewer | `200`, `name`, `logo`, optional `favicon`, `accent`, `language`, `support` |
-| `GET /index.php?view=application` | Same OEM viewer | `200`, `name` and `status` |
+| `GET /index.php?view=branding` | Public customer shell (no admin session) | `200`, `name`, `logo`, optional `favicon`, `accent`, `language`, `support` |
+| `GET /index.php?view=application` | OEM admin session on `/setup.php` | `200`, `name` and `status` |
 | `GET /index.php?brand=logo` or `?brand=favicon` | Same OEM viewer | `200`, stored PNG for the requested role |
 | `GET /index.php?asset=…` | OEM browser, versioned allowlisted static bundle path | `200`, JavaScript or CSS from the active or previous release |
 

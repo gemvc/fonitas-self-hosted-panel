@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import { BrandMark } from "./brand-mark";
 import type { messages } from "./locale";
+import type { OemBranding } from "./oem-branding";
 import { BuySection } from "./pages/customer/sections";
 
 type Text = typeof messages.en;
@@ -8,16 +10,18 @@ type Text = typeof messages.en;
 export function GuestBuy({
   t,
   menu,
+  branding,
   onBackToAuth,
 }: {
   t: Text;
   menu: ReactNode;
+  branding: OemBranding;
   onBackToAuth: () => void;
 }) {
   return (
     <div className="workspace">
       <header className="topbar">
-        <strong>Fonitas</strong>
+        <BrandMark branding={branding} />
         <div className="actions">
           {menu}
           <button type="button" onClick={onBackToAuth}>{t.backToSignIn}</button>

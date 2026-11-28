@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { BrandMark } from "./brand-mark";
 import {
   IdentityApiError,
   resendEmailVerification,
@@ -6,6 +7,7 @@ import {
   verifyEmailByCode,
 } from "./identity-api";
 import type { messages } from "./locale";
+import type { OemBranding } from "./oem-branding";
 import {
   clearVerificationEmailPending,
   isVerificationEmailPending,
@@ -37,13 +39,17 @@ export function EmailVerificationGate({
   t,
   me,
   menu,
+  branding,
   onVerified,
+  onBrowseAsGuest,
   onSignOut,
 }: {
   t: Text;
   me: PanelMe;
   menu: ReactNode;
+  branding: OemBranding;
   onVerified: (me: PanelMe) => void;
+  onBrowseAsGuest: () => void;
   onSignOut: () => void;
 }) {
   const email = me.email ?? "";
@@ -152,7 +158,7 @@ export function EmailVerificationGate({
   return (
     <main className="setup">
       <section className="card">
-        <header className="bar"><strong>Fonitas</strong>{menu}</header>
+        <header className="bar"><BrandMark branding={branding} />{menu}</header>
         <section className="auth">
           <h1>{t.verifyEmailHeading}</h1>
           <p className="muted">{t.verifyGateIntro}</p>
@@ -194,6 +200,9 @@ export function EmailVerificationGate({
             </button>
           </form>
           {errorText && <p role="alert" className="error">{errorText}</p>}
+          <button type="button" className="full" onClick={onBrowseAsGuest} disabled={busy}>
+            {t.browseOffersWhileUnverified}
+          </button>
           <button type="button" className="full" onClick={onSignOut} disabled={busy}>{t.signOut}</button>
         </section>
       </section>

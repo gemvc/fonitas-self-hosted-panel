@@ -86,6 +86,7 @@ export type IdentityLoginResult = {
   email_verified: boolean;
   tenant_slug: string;
   mfa_required?: boolean;
+  challenge_token?: string;
 };
 
 /** Resolve the application Identity tenant for this installation Origin. */
@@ -149,17 +150,21 @@ export async function loginIdentityUser(input: {
     const body = await response.json() as {
       data?: {
         mfa_required?: boolean;
+        challenge_token?: string;
         display_name?: string;
         primary_email?: { email?: string; is_verified?: boolean };
       };
     };
     if (body.data?.mfa_required) {
+      const challenge = body.data.challenge_token?.trim() ?? "";
+      if (!challenge) throw new IdentityApiError("unavailable", response.status);
       return {
         display_name: "",
         email: input.email,
         email_verified: false,
         tenant_slug: slug,
         mfa_required: true,
+        challenge_token: challenge,
       };
     }
     return {
@@ -169,6 +174,79 @@ export async function loginIdentityUser(input: {
       tenant_slug: slug,
     };
   }
+  if (response.status === 401) throw new IdentityApiError("auth_failed", 401);
+  if (response.status === 429) throw await rateLimitedError(response);
+  if (response.status === 422) throw new IdentityApiError("validation", 422);
+  throw new IdentityApiError("unavailable", response.status);
+}
+
+/** Complete MFA after password login returned `challenge_token`. */
+export async function verifyMfaChallenge(input: {
+  token: string;
+  code: string;
+}): Promise<IdentityLoginResult> {
+  const slug = await tenantSlug();
+  let response: Response;
+  try {
+    response = await identityRequest("/auth/mfa/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: input.token, code: input.code }),
+    });
+  } catch {
+    throw new IdentityApiError("unavailable");
+  }
+  if (response.status === 200) {
+    const body = await response.json() as {
+      data?: {
+        display_name?: string;
+        primary_email?: { email?: string; is_verified?: boolean };
+      };
+    };
+    return {
+      display_name: body.data?.display_name || body.data?.primary_email?.email?.split("@")[0] || "Customer",
+      email: body.data?.primary_email?.email || "",
+      email_verified: Boolean(body.data?.primary_email?.is_verified),
+      tenant_slug: slug,
+    };
+  }
+  if (response.status === 401) throw new IdentityApiError("auth_failed", 401);
+  if (response.status === 429) throw await rateLimitedError(response);
+  if (response.status === 422) throw new IdentityApiError("validation", 422);
+  throw new IdentityApiError("unavailable", response.status);
+}
+
+/** Always 204 when the body shape is accepted (anti-enumeration). */
+export async function forgotPassword(email: string): Promise<void> {
+  const slug = await tenantSlug();
+  let response: Response;
+  try {
+    response = await identityRequest("/auth/password/forgot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tenant_slug: slug, email }),
+    });
+  } catch {
+    throw new IdentityApiError("unavailable");
+  }
+  if (response.status === 204) return;
+  if (response.status === 429) throw await rateLimitedError(response);
+  if (response.status === 422) throw new IdentityApiError("validation", 422);
+  throw new IdentityApiError("unavailable", response.status);
+}
+
+export async function resetPassword(token: string, password: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await identityRequest("/auth/password/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, password }),
+    });
+  } catch {
+    throw new IdentityApiError("unavailable");
+  }
+  if (response.status === 204) return;
   if (response.status === 401) throw new IdentityApiError("auth_failed", 401);
   if (response.status === 429) throw await rateLimitedError(response);
   if (response.status === 422) throw new IdentityApiError("validation", 422);

@@ -1,13 +1,16 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { BrandMark } from "./brand-mark";
 import { EmailVerificationGate } from "./email-verification-gate";
 import { isCustomerSection, type CustomerSection } from "./customer-nav";
 import type { messages } from "./locale";
+import type { OemBranding } from "./oem-branding";
 import {
   loadPanelMe,
   rememberLocalMe,
   SessionEndedError,
   type PanelMe,
 } from "./panel-me";
+import { initialCustomerSection } from "./panel-return";
 import { CustomerDashboard } from "./pages/customer-dashboard";
 import { ProfileMenu } from "./profile-menu";
 import { isCustomer } from "./roles";
@@ -18,22 +21,29 @@ export function Workspace({
   token,
   endSession,
   onSignOut,
+  onBrowseAsGuest,
   t,
   menu,
+  branding,
+  initialSection,
 }: {
   token: string;
   endSession: () => void;
   onSignOut: () => void;
+  onBrowseAsGuest: () => void;
   t: Text;
   menu: ReactNode;
+  branding: OemBranding;
+  initialSection?: CustomerSection;
 }) {
   const [me, setMe] = useState<PanelMe>();
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
-  const [section, setSection] = useState<CustomerSection>(() => {
-    const fromQuery = new URLSearchParams(window.location.search).get("section") ?? "";
-    return isCustomerSection(fromQuery) ? fromQuery : "overview";
-  });
+  const [section, setSection] = useState<CustomerSection>(() =>
+    initialSection && isCustomerSection(initialSection)
+      ? initialSection
+      : initialCustomerSection(),
+  );
 
   useEffect(() => {
     let active = true;
@@ -71,7 +81,9 @@ export function Workspace({
         t={t}
         me={me}
         menu={menu}
+        branding={branding}
         onVerified={handleMeChange}
+        onBrowseAsGuest={onBrowseAsGuest}
         onSignOut={onSignOut}
       />
     );
@@ -80,7 +92,7 @@ export function Workspace({
   return (
     <div className="workspace">
       <header className="topbar">
-        <strong>Fonitas</strong>
+        <BrandMark branding={branding} />
         <div className="actions">
           {menu}
           {me && customer && verified && (

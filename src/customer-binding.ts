@@ -102,6 +102,14 @@ export function parseCheckoutReturn(search: string): "success" | "cancel" | null
   return null;
 }
 
+/** Cold Stripe/buy return should open guest shop without forcing sign-in first. */
+export function shouldOpenGuestShop(search = ""): boolean {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const checkout = (params.get("checkout") || "").trim().toLowerCase();
+  const section = (params.get("section") || "").trim().toLowerCase();
+  return checkout === "success" || checkout === "cancel" || section === "buy";
+}
+
 export function filterPurchasesForApplication(
   purchases: BoundPurchase[],
   applicationId: string | null,

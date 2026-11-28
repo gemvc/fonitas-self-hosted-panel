@@ -15,7 +15,9 @@ button, select, input { border: 1px solid #d7d7d7; border-radius: 0.5rem; paddin
 button, select { cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: default; }
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid #235cd8; outline-offset: 2px; }
-button.primary { background: #181818; color: #fff; border-color: #181818; }
+button.primary { background: var(--dashboard-accent, #181818); color: #fff; border-color: var(--dashboard-accent, #181818); }
+.brand-mark { display: inline-flex; align-items: center; gap: 0.5rem; }
+.brand-logo { width: 1.5rem; height: 1.5rem; object-fit: contain; }
 .full { width: 100%; }
 .setup { display: grid; min-height: 100svh; place-items: center; padding: 1rem; }
 .card, .applications { background: #fff; border: 1px solid #dedede; border-radius: 0.9rem; }

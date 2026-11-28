@@ -680,25 +680,8 @@ function panelRuntime(array $state, string $directory): never
             panelFail(503, 'Application unavailable.');
         }
     }
-    // Installation-credential JSON stays admin-only; buyers use Identity from the React shell.
-    if ($view === 'application' || $view === 'branding') {
-        if (!panelIsAdmin()) {
-            panelRequireLoginRedirect();
-        }
-        if ($view === 'application') {
-            try {
-                [$status, $body] = panelHttp(PANEL_API.'/application', 16384, ['Origin: '.$state['origin'], 'Authorization: Bearer '.$state['credential']]);
-                $payload = json_decode($body, true);
-                $application = is_array($payload) ? ($payload['data']['application'] ?? null) : null;
-                if ($status !== 200 || !is_array($application)
-                    || !is_string($application['name'] ?? null) || !is_string($application['status'] ?? null)) {
-                    panelFail(503, 'Application unavailable.');
-                }
-                panelJson(['name' => $application['name'], 'status' => $application['status']]);
-            } catch (RuntimeException) {
-                panelFail(503, 'Application unavailable.');
-            }
-        }
+    // Public branding for the customer React shell (name / logo / accent only — no credentials).
+    if ($view === 'branding') {
         $branding = $state['branding'];
         foreach (['logo', 'favicon'] as $field) {
             if (isset($branding[$field.'_file'])) {
@@ -706,7 +689,33 @@ function panelRuntime(array $state, string $directory): never
                 unset($branding[$field.'_file']);
             }
         }
-        panelJson($branding);
+        panelJson([
+            'name' => is_string($branding['name'] ?? null) ? $branding['name'] : 'Fonitas',
+            'logo' => is_string($branding['logo'] ?? null) ? $branding['logo'] : '',
+            'favicon' => is_string($branding['favicon'] ?? null) ? $branding['favicon'] : '',
+            'accent' => is_string($branding['accent'] ?? null) ? $branding['accent'] : '#0f766e',
+            'language' => is_string($branding['language'] ?? null) ? $branding['language'] : 'en',
+            'support' => is_string($branding['support'] ?? null) ? $branding['support'] : '',
+        ]);
+    }
+
+    // Installation-credential JSON stays admin-only; buyers use Identity from the React shell.
+    if ($view === 'application') {
+        if (!panelIsAdmin()) {
+            panelRequireLoginRedirect();
+        }
+        try {
+            [$status, $body] = panelHttp(PANEL_API.'/application', 16384, ['Origin: '.$state['origin'], 'Authorization: Bearer '.$state['credential']]);
+            $payload = json_decode($body, true);
+            $application = is_array($payload) ? ($payload['data']['application'] ?? null) : null;
+            if ($status !== 200 || !is_array($application)
+                || !is_string($application['name'] ?? null) || !is_string($application['status'] ?? null)) {
+                panelFail(503, 'Application unavailable.');
+            }
+            panelJson(['name' => $application['name'], 'status' => $application['status']]);
+        } catch (RuntimeException) {
+            panelFail(503, 'Application unavailable.');
+        }
     }
 
     // Public customer React shell (login / register). Management stays on /setup.php.

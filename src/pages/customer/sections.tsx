@@ -45,6 +45,7 @@ import {
   updateLocalMe,
   type PanelMe,
 } from "../../panel-me";
+import { stashPostAuthSection } from "../../panel-return";
 import { ActionRow, EmptyPanel, SectionFrame } from "./section-frame";
 
 type Text = typeof messages.en;
@@ -186,6 +187,7 @@ export function BuySection({
     const returned = parseCheckoutReturn(window.location.search);
     if (returned === "success") {
       setStatus(signedIn ? t.checkoutReturnSuccessSignedIn : t.checkoutReturnSuccessGuest);
+      if (!signedIn) stashPostAuthSection("licenses");
     } else if (returned === "cancel") {
       setStatus(t.checkoutReturnCancel);
     }
@@ -246,6 +248,7 @@ export function BuySection({
         onGoLicenses();
         return;
       }
+      stashPostAuthSection("licenses");
       setStatus(t.checkoutFreeGuest);
     } catch (cause) {
       if (cause instanceof CustomerApiError && cause.code === "PAYMENT_NOT_CONFIGURED") {
@@ -317,7 +320,7 @@ export function BuySection({
   );
 }
 
-export function LicensesSection({ t }: { t: Text }) {
+export function LicensesSection({ t, go }: { t: Text; go: Go }) {
   const [purchases, setPurchases] = useState<BoundPurchase[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attachMsg, setAttachMsg] = useState<string | null>(null);
@@ -367,10 +370,8 @@ export function LicensesSection({ t }: { t: Text }) {
   async function onAttach(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
-    const parsed = resolveAttachFields(
-      String(fd.get("license_id") ?? ""),
-      String(fd.get("signed_url") ?? ""),
-    );
+    const pasted = String(fd.get("recovery") ?? "").trim();
+    const parsed = resolveAttachFields(pasted, "");
     if (!parsed) {
       setAttachMsg(t.attachLicenseFailed);
       return;
@@ -391,18 +392,26 @@ export function LicensesSection({ t }: { t: Text }) {
 
   return (
     <SectionFrame title={t.navLicenses} intro={t.licensesIntro}>
-      {purchases == null ? <p className="muted">{t.loading}</p> : <PurchaseRows t={t} purchases={purchases} />}
+      {purchases == null ? (
+        <p className="muted">{t.loading}</p>
+      ) : purchases.length === 0 ? (
+        <>
+          <EmptyPanel message={t.licensesEmpty} />
+          <ActionRow>
+            <button type="button" className="primary" onClick={() => go("buy")}>{t.goToBuy}</button>
+          </ActionRow>
+        </>
+      ) : (
+        <PurchaseRows t={t} purchases={purchases} />
+      )}
       {error && <p role="alert" className="error">{error}</p>}
 
       <section className="panel-section">
         <h2>{t.attachLicense}</h2>
         <p className="muted">{t.attachLicenseIntro}</p>
         <form className="profile-form" onSubmit={event => void onAttach(event)}>
-          <label>{t.licenseIdLabel}
-            <input name="license_id" required disabled={busy} />
-          </label>
-          <label>{t.signedUrlLabel}
-            <input name="signed_url" type="url" required disabled={busy} />
+          <label>{t.recoveryPasteLabel}
+            <input name="recovery" type="url" required disabled={busy} dir="ltr" placeholder="https://…" />
           </label>
           <button type="submit" className="primary" disabled={busy}>{busy ? t.loading : t.attachLicense}</button>
         </form>
@@ -417,17 +426,6 @@ export function LicensesSection({ t }: { t: Text }) {
           <div><dt>{t.licenseKindDevice}</dt><dd>{t.licenseKindDeviceHint}</dd></div>
           <div><dt>{t.licenseKindMultiDevice}</dt><dd>{t.licenseKindMultiDeviceHint}</dd></div>
         </dl>
-      </section>
-
-      <section className="panel-section">
-        <h2>{t.devicesHeading}</h2>
-        <p className="muted">{t.devicesIntro}</p>
-        <EmptyPanel message={t.devicesEmpty} />
-        <p className="muted">{t.devicesUnavailable}</p>
-        <ActionRow>
-          <button type="button" className="primary" disabled>{t.registerDevice}</button>
-          <button type="button" disabled>{t.removeDevice}</button>
-        </ActionRow>
       </section>
     </SectionFrame>
   );
@@ -462,9 +460,7 @@ export function SubscriptionsSection({ t, go }: { t: Text; go: Go }) {
       )}
       <ActionRow>
         <button type="button" className="primary" onClick={() => go("buy")}>{t.registerSubscription}</button>
-        <button type="button" disabled title={t.cancelUnavailable}>{t.cancelSubscription}</button>
       </ActionRow>
-      <p className="muted">{t.cancelUnavailable}</p>
     </SectionFrame>
   );
 }
@@ -499,12 +495,6 @@ export function BillingSection({ t }: { t: Text }) {
         ) : (
           <PurchaseRows t={t} purchases={purchases} />
         )}
-      </section>
-      <section className="panel-section">
-        <h2>{t.paymentsHeading}</h2>
-        <p className="muted">{t.paymentsIntro}</p>
-        <EmptyPanel message={t.paymentsEmpty} />
-        <p className="muted">{t.paymentMethodsUnavailable}</p>
       </section>
     </SectionFrame>
   );
@@ -960,18 +950,6 @@ export function ProfileSection({
       <section className="panel-section">
         <h2>{t.changePassword}</h2>
         <p className="muted">{t.changePasswordIntro}</p>
-        <form className="profile-form" onSubmit={event => event.preventDefault()}>
-          <label>{t.currentPassword}
-            <input type="password" autoComplete="current-password" disabled />
-          </label>
-          <label>{t.newPassword}
-            <input type="password" autoComplete="new-password" disabled />
-          </label>
-          <label>{t.confirmPassword}
-            <input type="password" autoComplete="new-password" disabled />
-          </label>
-          <button type="submit" className="primary" disabled>{t.changePassword}</button>
-        </form>
       </section>
 
       {helpSpace && (
@@ -990,22 +968,6 @@ export function ProfileSection({
           </ActionRow>
         </section>
       )}
-
-      <section className="panel-section">
-        <h2>{t.paymentMethodsHeading}</h2>
-        <p className="muted">{t.paymentMethodsIntro}</p>
-        <EmptyPanel message={t.paymentMethodsEmpty} />
-        <p className="muted">{t.paymentMethodsUnavailable}</p>
-        <ActionRow>
-          <button type="button" className="primary" disabled>{t.addPaymentMethod}</button>
-        </ActionRow>
-      </section>
-
-      <section className="panel-section">
-        <h2>{t.emailHeading}</h2>
-        <p className="muted">{t.emailIntro}</p>
-        <EmptyPanel message={t.emailEmpty} />
-      </section>
     </SectionFrame>
   );
 }
