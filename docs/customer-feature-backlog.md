@@ -34,7 +34,7 @@ Sidebar sections today: overview · buy · licenses · subscriptions · billing 
 | C-12 | Show edition, platforms, seats, runtime/support cutoffs | From purchase `snapshot` + `validity` on C-10 | Wired |
 | C-13 | Overview counters (licenses, open tickets, …) | Derive from C-10 / Support list | Wired |
 | C-14 | Device register / remove UI | **Needed** — seats/devices are snapshot facts only; no device CRUD | Needed |
-| C-15 | In-app “reveal key” without recovery link | **Needed** — raw key only via signed guest recovery; do not invent a key dump | Needed (or keep email-only) |
+| C-15 | In-app “reveal key” without recovery link | **Won’t build** — stay email-only guest recovery + attach; no signed-in raw key dump | Resolved (email-only) |
 
 ---
 
@@ -59,7 +59,7 @@ Sidebar sections today: overview · buy · licenses · subscriptions · billing 
 | C-33 | Reply as customer | `POST /support/tickets/{id}/messages` with `COMMENT` | Wired |
 | C-34 | Hide agent actions | Assign / resolve / close / reopen / `NOTE` only if `support.ticket.assign` | Wired (RBAC + agent actions in OEM) |
 | C-35 | Attachments upload | Metadata-only today; **Needed** byte upload contract if buyers must attach files | Needed (or defer) |
-| C-36 | Ticket email ingress / CSAT | Documented deferred in Support domain | Needed (later) |
+| C-36 | CSAT after resolve/close | **Done in Symfony** — email ingress still deferred | Ready (CSAT); deferred (email) |
 
 ---
 
