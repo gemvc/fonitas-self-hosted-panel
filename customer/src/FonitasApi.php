@@ -13,7 +13,10 @@ final readonly class FonitasApi
     {
     }
 
-    public function bindingIsValid(): bool
+    /**
+     * @return array{status: int, body: string}
+     */
+    private function fetchApplication(): array
     {
         if (!extension_loaded('curl')) {
             throw new \RuntimeException('PHP cURL is unavailable.');
@@ -45,9 +48,43 @@ final readonly class FonitasApi
         if (curl_exec($curl) === false) {
             throw new \RuntimeException('Fonitas API is unavailable.');
         }
-        $status = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
 
-        return $this->matchesBinding($status, $body);
+        return ['status' => $status, 'body' => $body];
+    }
+
+    public function bindingIsValid(): bool
+    {
+        $response = $this->fetchApplication();
+
+        return $this->matchesBinding($response['status'], $response['body']);
+    }
+
+    /**
+     * Public allowlisted binding for the OEM buyer UI (no credential leak).
+     *
+     * @return array{application_id: string, name: string|null, status: string|null}
+     */
+    public function boundApplication(): array
+    {
+        $response = $this->fetchApplication();
+        if (!$this->matchesBinding($response['status'], $response['body'])) {
+            throw new \RuntimeException('Installation binding is invalid.');
+        }
+        $payload = json_decode($response['body'], true);
+        $application = is_array($payload) ? ($payload['data']['application'] ?? null) : null;
+        $id = is_array($application) ? ($application['public_id'] ?? null) : null;
+        if (!is_string($id)) {
+            throw new \RuntimeException('Invalid application response from Fonitas.');
+        }
+        $name = is_array($application) && is_string($application['name'] ?? null) ? $application['name'] : null;
+        $status = is_array($application) && is_string($application['status'] ?? null) ? $application['status'] : null;
+
+        return [
+            'application_id' => $id,
+            'name' => $name,
+            'status' => $status,
+        ];
     }
 
     public function matchesBinding(int $status, string $body): bool

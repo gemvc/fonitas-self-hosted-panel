@@ -64,7 +64,7 @@ The app's own website (this OEM panel) hosts login and registration forms. The b
 - Email uniqueness is `(identity_tenant, email)`. The same address may exist on fonitas.com and on App A / App B as separate users.
 - Resolve the application (and owning organization) from the installation binding. A browser-supplied company or application identifier does not establish authorization.
 - Register in an application tenant grants `APP_END_USER` in that realm. Sessions use lane `APPLICATION_TENANT`.
-- Same-origin customer PHP against Identity cookies remains a follow-up; the static UI currently opens a local OEM session after Identity register. [Customer PHP backend](#customer-only-php-backend)
+- Same-origin customer PHP proxies `/api/v1/*` to Fonitas (Identity cookies + buyer APIs) in OEM builds (`VITE_OEM_SAME_ORIGIN_API`). The static UI may still open a local OEM session shell after Identity register. [Customer PHP backend](#customer-only-php-backend) · [customer-backend-apis.md](customer-backend-apis.md)
 
 ### Future installation and branding
 
@@ -333,11 +333,15 @@ For an expired key or an older request without a key, select **Get connection ke
 
 Dashboard and setup share one PHP session after `.env` login. Updates use **Download and install** on `/setup.php` (signed GitHub release). Reconnect only when Custom Domains issues a new `fpk_` key. [PHP runtime and settings](../installer/setup.php)
 
-### Resume OEM customer sign-in work
+### Resume OEM customer product work
 
-The last reported check on `dashboard.infrasible.com` showed the PHP viewer guard's `403` after `v0.3.5` was published. The host's authenticated identity and successful dashboard access have not been confirmed.
+Identity register / login / verification and buyer sections (licenses, buy, support, billing display) are wired against Symfony. OEM builds use the [customer PHP](#customer-only-php-backend) `/api/v1` cookie bridge (`UpstreamProxy`) plus `/api/bound-application`. Remaining gaps are Symfony **Needed** APIs: [customer-symfony-needed.md](customer-symfony-needed.md).
 
-Continue from the [customer PHP foundation](#customer-only-php-backend). Start with [customer registration from the app site](#first-milestone-customer-registration-from-the-app-site). Then add the Symfony contract that checks both the signed-in buyer and the application bound to the installation. Then wire the PHP routes and build the customer frontend. Verify that an entitled buyer can sign in and see their purchases and licenses, and that other buyers and applications stay isolated. The existing organization-member sign-in is for the developer dashboard. The existing buyer-purchase route authenticates the buyer but does not apply the OEM installation's app binding. [Organization session service][sessions] · [Buyer purchases API](https://github.com/gemvc/symfony_fonitas/blob/main/src/License/Presentation/Http/Rest/BuyerPurchasesController.php)
+**API map (deployable buyer surfaces):** [customer-backend-apis.md](customer-backend-apis.md) — Identity, catalog/checkout, `license/me/purchases`, Support tickets, Help public articles.
+
+**Feature backlog:** [customer-feature-backlog.md](customer-feature-backlog.md) — Ready vs Needed per sidebar section (buy, licenses, support, …).
+
+Verify that an entitled buyer can sign in and see their purchases and licenses, and that other buyers and applications stay isolated. Org-member panel session is not the buyer path. Buyer purchases: [Buyer purchases API](https://github.com/gemvc/symfony_fonitas/blob/main/src/License/Presentation/Http/Rest/BuyerPurchasesController.php) · [sessions][sessions]
 
 ## Releases
 

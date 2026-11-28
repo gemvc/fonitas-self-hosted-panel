@@ -15,7 +15,9 @@ Installation binding keeps the **domain connection key**. An **application API k
 
 ## Customer PHP backend
 
-[Configure the customer-only backend and check the application binding](docs/engineering.md#customer-only-php-backend). The source checkout contains the readiness route. Customer sign-in and purchase and license views are planned.
+[Configure the customer-only backend and check the application binding](docs/engineering.md#customer-only-php-backend). The source checkout contains the readiness route.
+
+Buyer API map (what Symfony already exposes for `APP_END_USER`): [docs/customer-backend-apis.md](docs/customer-backend-apis.md). Feature backlog (panel sections ↔ Ready / Needed APIs): [docs/customer-feature-backlog.md](docs/customer-feature-backlog.md). Symfony Needed track: [docs/customer-symfony-needed.md](docs/customer-symfony-needed.md).
 
 ## Build
 

@@ -1,15 +1,22 @@
 /**
  * Identity API for public registration and email verification (OEM customer profile).
  * In DEV, use the Vite proxy (`/fonitas-api`) so localhost does not depend on CORS.
+ * OEM production builds set VITE_OEM_SAME_ORIGIN_API and talk to `/api/v1` (customer PHP bridge).
  * Buyers register in the application-owned Identity realm (not tenant `fonitas`).
  */
+const viteEnv = import.meta.env ?? {};
+
 export const identityApi = (
-  import.meta.env.VITE_IDENTITY_API?.trim()
-  || (import.meta.env.DEV ? "/fonitas-api/api/v1" : "https://api.fonitas.com/api/v1")
+  String(viteEnv.VITE_IDENTITY_API ?? "").trim()
+  || (viteEnv.DEV
+    ? "/fonitas-api/api/v1"
+    : viteEnv.VITE_OEM_SAME_ORIGIN_API === "true"
+      ? "/api/v1"
+      : "https://api.fonitas.com/api/v1")
 );
 
 const envTenantSlug = () =>
-  import.meta.env.VITE_IDENTITY_TENANT_SLUG?.trim() || "";
+  String(viteEnv.VITE_IDENTITY_TENANT_SLUG ?? "").trim();
 
 let resolvedTenantSlug: string | null = envTenantSlug() || null;
 let tenantResolvePromise: Promise<string> | null = null;
@@ -17,7 +24,8 @@ let tenantResolvePromise: Promise<string> | null = null;
 function identityRequest(path: string, init?: RequestInit): Promise<Response> {
   return fetch(identityApi + path, {
     ...init,
-    credentials: "omit",
+    // Cookie session for license/support after login; CSRF fetched separately when needed.
+    credentials: "include",
     cache: "no-store",
     headers: {
       Accept: "application/json",

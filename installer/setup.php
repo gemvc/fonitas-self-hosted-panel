@@ -661,6 +661,25 @@ function panelRuntime(array $state, string $directory): never
     }
 
     $view = $_GET['view'] ?? null;
+    // Public allowlisted application id for OEM buyer UI filtering (no credential leak).
+    if ($view === 'bound-application') {
+        try {
+            [$status, $body] = panelHttp(PANEL_API.'/application', 16384, ['Origin: '.$state['origin'], 'Authorization: Bearer '.$state['credential']]);
+            $payload = json_decode($body, true);
+            $application = is_array($payload) ? ($payload['data']['application'] ?? null) : null;
+            $id = is_array($application) ? ($application['public_id'] ?? null) : null;
+            if ($status !== 200 || !is_string($id)) {
+                panelFail(503, 'Application unavailable.');
+            }
+            panelJson([
+                'application_id' => $id,
+                'name' => is_string($application['name'] ?? null) ? $application['name'] : null,
+                'status' => is_string($application['status'] ?? null) ? $application['status'] : null,
+            ]);
+        } catch (RuntimeException) {
+            panelFail(503, 'Application unavailable.');
+        }
+    }
     // Installation-credential JSON stays admin-only; buyers use Identity from the React shell.
     if ($view === 'application' || $view === 'branding') {
         if (!panelIsAdmin()) {
